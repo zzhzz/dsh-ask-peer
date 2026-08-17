@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { PeerConfig } from '../config.ts'
 import type { AskPeerSettings, LocalSettings } from '../settings.ts'
+import { themeTokens } from './theme.ts'
 
 type FriendMode = 'ask' | 'auto' | 'deny'
 
@@ -15,18 +16,46 @@ interface FriendDraft {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  card: { display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 640 },
-  block: { border: '1px solid #d8dee6', borderRadius: 10, padding: 12, background: '#fbfcfe' },
+  card: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 16,
+    maxWidth: 640,
+    color: themeTokens.text,
+  },
+  block: {
+    border: `1px solid ${themeTokens.border}`,
+    borderRadius: 10,
+    padding: 12,
+    background: themeTokens.blockBg,
+  },
   heading: { fontWeight: 600, marginBottom: 8 },
   row: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
-  label: { fontSize: 12, color: '#667' },
-  input: { padding: '4px 8px', borderRadius: 6, border: '1px solid #c3cbd6', background: '#fff' },
+  label: { fontSize: 12, color: themeTokens.muted },
+  input: {
+    padding: '4px 8px',
+    borderRadius: 6,
+    border: `1px solid ${themeTokens.borderInput}`,
+    background: themeTokens.inputBg,
+    color: themeTokens.text,
+  },
   wide: { flex: 1, minWidth: 180 },
-  button: { padding: '4px 12px', borderRadius: 6, border: '1px solid #c3cbd6', background: '#fff', cursor: 'pointer' },
-  primary: { background: '#1f6feb', borderColor: '#1f6feb', color: '#fff' },
-  mono: { fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' },
-  error: { color: '#c62828' },
-  muted: { color: '#667', fontSize: 12 },
+  button: {
+    padding: '4px 12px',
+    borderRadius: 6,
+    border: `1px solid ${themeTokens.borderInput}`,
+    background: themeTokens.buttonBg,
+    color: themeTokens.text,
+    cursor: 'pointer',
+  },
+  primary: {
+    background: themeTokens.primaryBg,
+    borderColor: themeTokens.primaryBg,
+    color: themeTokens.primaryText,
+  },
+  mono: { fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all', color: themeTokens.textSecondary },
+  error: { color: themeTokens.error },
+  muted: { color: themeTokens.muted, fontSize: 12 },
 }
 
 function emptyFriend(): FriendDraft {

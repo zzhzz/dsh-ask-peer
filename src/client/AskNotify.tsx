@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { PendingAskView } from '../protocol.ts'
+import { themeTokens } from './theme.ts'
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
@@ -13,17 +14,29 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: 380,
   },
   card: {
-    background: '#fff',
-    border: '1px solid #d8dee6',
+    background: themeTokens.blockBg,
+    border: `1px solid ${themeTokens.border}`,
     borderRadius: 10,
     padding: '10px 12px',
     boxShadow: '0 4px 14px rgba(0,0,0,.14)',
+    color: themeTokens.text,
   },
   header: { fontWeight: 600, marginBottom: 4 },
   question: { whiteSpace: 'pre-wrap', marginBottom: 8, fontSize: 13 },
   actions: { display: 'flex', gap: 8 },
-  button: { padding: '4px 12px', borderRadius: 6, border: '1px solid #c3cbd6', background: '#fff', cursor: 'pointer' },
-  primary: { background: '#1f6feb', borderColor: '#1f6feb', color: '#fff' },
+  button: {
+    padding: '4px 12px',
+    borderRadius: 6,
+    border: `1px solid ${themeTokens.borderInput}`,
+    background: themeTokens.buttonBg,
+    color: themeTokens.text,
+    cursor: 'pointer',
+  },
+  primary: {
+    background: themeTokens.primaryBg,
+    borderColor: themeTokens.primaryBg,
+    color: themeTokens.primaryText,
+  },
 }
 
 /**

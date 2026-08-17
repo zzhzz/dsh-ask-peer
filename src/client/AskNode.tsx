@@ -1,24 +1,37 @@
 import { useState } from 'react'
 import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AskChatData } from './index.ts'
+import { themeTokens } from './theme.ts'
 
 const styles: Record<string, React.CSSProperties> = {
   card: {
-    border: '1px solid #d8dee6',
+    border: `1px solid ${themeTokens.border}`,
     borderRadius: '10px',
     padding: '10px 12px',
     margin: '4px 0',
     maxWidth: '560px',
-    background: '#fbfcfe',
+    background: themeTokens.blockBg,
+    color: themeTokens.text,
   },
   header: { fontWeight: 600, marginBottom: 4 },
   question: { whiteSpace: 'pre-wrap', marginBottom: 6 },
-  files: { color: '#667', fontSize: 12, marginBottom: 6 },
+  files: { color: themeTokens.muted, fontSize: 12, marginBottom: 6 },
   answer: { whiteSpace: 'pre-wrap', marginBottom: 4 },
   actions: { display: 'flex', gap: 8, marginTop: 8 },
-  button: { padding: '4px 12px', borderRadius: 6, border: '1px solid #c3cbd6', background: '#fff', cursor: 'pointer' },
-  buttonPrimary: { background: '#1f6feb', borderColor: '#1f6feb', color: '#fff' },
-  muted: { color: '#667' },
+  button: {
+    padding: '4px 12px',
+    borderRadius: 6,
+    border: `1px solid ${themeTokens.borderInput}`,
+    background: themeTokens.buttonBg,
+    color: themeTokens.text,
+    cursor: 'pointer',
+  },
+  buttonPrimary: {
+    background: themeTokens.primaryBg,
+    borderColor: themeTokens.primaryBg,
+    color: themeTokens.primaryText,
+  },
+  muted: { color: themeTokens.muted },
 }
 
 /**
