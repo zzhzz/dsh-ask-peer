@@ -86,6 +86,33 @@ function toPeer(draft: FriendDraft): PeerConfig {
   }
 }
 
+function NumberField({
+  label,
+  hint,
+  value,
+  width = 110,
+  onChange,
+}: {
+  label: string
+  hint: string
+  value: number
+  width?: number
+  onChange: (value: number) => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: width }}>
+      <span style={styles.label}>{label}</span>
+      <input
+        style={{ ...styles.input, width }}
+        type="number"
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      <span style={styles.muted}>{hint}</span>
+    </div>
+  )
+}
+
 interface ConfigDocument {
   serverUrl: string
   identity: { publicKey: string; fingerprint: string }
@@ -345,7 +372,7 @@ export function AskPeerSettingsSection() {
             onChange={(event) => setLocal({ ...local!, workspace: event.target.value })}
           />
         </div>
-        <div style={{ ...styles.row, marginTop: 6 }}>
+        <div style={{ ...styles.row, marginTop: 6, alignItems: 'flex-start' }}>
           <input
             style={{ ...styles.input, width: 160 }}
             value={local?.provider ?? ''}
@@ -358,35 +385,31 @@ export function AskPeerSettingsSection() {
             placeholder="model override (optional)"
             onChange={(event) => setLocal({ ...local!, model: event.target.value })}
           />
-          <input
-            style={{ ...styles.input, width: 110 }}
-            type="number"
+          <NumberField
+            label="Ask timeout"
+            hint="how long to wait for a peer's answer"
             value={local?.timeoutMs ?? 120000}
-            placeholder="ask timeout ms"
-            onChange={(event) => setLocal({ ...local!, timeoutMs: Number(event.target.value) })}
+            onChange={(value) => setLocal({ ...local!, timeoutMs: value })}
           />
         </div>
-        <div style={{ ...styles.row, marginTop: 6 }}>
-          <input
-            style={{ ...styles.input, width: 120 }}
-            type="number"
+        <div style={{ ...styles.row, marginTop: 6, alignItems: 'flex-start' }}>
+          <NumberField
+            label="Answer cap"
+            hint="max chars in a returned answer"
             value={local?.maxAnswerChars ?? 48000}
-            placeholder="answer cap chars"
-            onChange={(event) => setLocal({ ...local!, maxAnswerChars: Number(event.target.value) })}
+            onChange={(value) => setLocal({ ...local!, maxAnswerChars: value })}
           />
-          <input
-            style={{ ...styles.input, width: 130 }}
-            type="number"
+          <NumberField
+            label="Approval timeout"
+            hint="how long to wait for you to approve an inbound ask"
             value={local?.approvalTimeoutMs ?? 120000}
-            placeholder="approval timeout ms"
-            onChange={(event) => setLocal({ ...local!, approvalTimeoutMs: Number(event.target.value) })}
+            onChange={(value) => setLocal({ ...local!, approvalTimeoutMs: value })}
           />
-          <input
-            style={{ ...styles.input, width: 110 }}
-            type="number"
+          <NumberField
+            label="Roster refresh"
+            hint="how often to re-fetch peers' ads (ms)"
             value={local?.rosterRefreshMs ?? 60000}
-            placeholder="roster refresh ms"
-            onChange={(event) => setLocal({ ...local!, rosterRefreshMs: Number(event.target.value) })}
+            onChange={(value) => setLocal({ ...local!, rosterRefreshMs: value })}
           />
           <label style={styles.label}>
             <input
