@@ -23,7 +23,9 @@ export interface SessionAdvert {
   createdAt: number
   /** Auto-generated session title (dsh's own titles), when available. */
   title?: string
-  /** Lightweight topics derived from the session title. */
+  /** Current working point, derived from the latest conversation. */
+  topic?: string
+  /** Lightweight topics derived from recent conversation (not the stale title). */
   topics?: string[]
   /** Epoch ms of the latest event in the session. */
   updatedAt?: number

@@ -29,13 +29,46 @@ const TOPIC_STOPWORDS = new Set([
   'verbatim', 'pick', 'best', 'matches', 'call', 'return', 'question',
 ])
 
-/** Lightweight topics from a session title: cleaned keywords, deduped, capped. */
-function topicsOf(title: string): string[] {
-  const words = title
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word.length > 2 && !TOPIC_STOPWORDS.has(word))
-  return [...new Set(words)].slice(0, 5)
+interface SessionTextPart {
+  text: string
+  source: 'user' | 'assistant'
+}
+
+function textFromBlocks(blocks: readonly { type?: string; text?: string }[]): string {
+  return blocks
+    .filter((block) => block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text as string)
+    .join('\n')
+    .trim()
+}
+
+function stripMarkup(text: string): string {
+  return text.replace(/<tool_calls>[\s\S]*?<\/tool_calls>/g, '').trim()
+}
+
+/** The current working point: the latest genuine user message, trimmed. */
+function topicOf(parts: readonly SessionTextPart[]): string {
+  const lastUser = [...parts].reverse().find((part) => part.source === 'user')
+  if (lastUser === undefined) return ''
+  return lastUser.text.replace(/\s+/g, ' ').trim().slice(0, 80)
+}
+
+/** Recency-weighted keywords from the recent conversation window. */
+function topicsOfRecent(parts: readonly SessionTextPart[], maxParts = 10): string[] {
+  const weights = new Map<string, number>()
+  const recent = parts.slice(-maxParts)
+  recent.forEach((part, index) => {
+    const weight = part.source === 'user' ? (index === recent.length - 1 ? 3 : 2) : 1
+    for (const word of part.text.toLowerCase().split(/[^a-z0-9]+/)) {
+      if (word.length > 2 && !TOPIC_STOPWORDS.has(word)) {
+        weights.set(word, (weights.get(word) ?? 0) + weight)
+      }
+    }
+  })
+  return [...weights.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([word]) => word)
 }
 
 export const name = 'ask-peer'
@@ -87,11 +120,15 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
             const tags = advert !== undefined && advert.tags.length > 0 ? ` [${advert.tags.join(', ')}]` : ''
             const description = advert !== undefined ? advert.description : (entry.peer.description ?? '')
             const reachable = entry.reachable ? '' : ' (unreachable)'
-            const titles = (advert?.sessions ?? [])
-              .map((s) => s.title)
-              .filter((t): t is string => t !== undefined && t !== '')
-            const sessions = titles.length > 0 ? ` — sessions: ${titles.join(' | ')}` : ''
-            return `- ${entry.peer.name}${reachable}${tags}${description ? `: ${description}` : ''}${sessions}`
+            const peerTopic =
+              (advert?.sessions ?? []).map((s) => s.topic).find((t) => t !== undefined && t !== '') ?? ''
+            const topic = peerTopic !== '' ? ` — working on: ${peerTopic}` : ''
+            const sessionTopics = [
+              ...new Set((advert?.sessions ?? []).flatMap((s) => s.topics ?? [])),
+            ].slice(0, 3)
+            const sessionHint =
+              topic === '' && sessionTopics.length > 0 ? ` — topics: ${sessionTopics.join(', ')}` : ''
+            return `- ${entry.peer.name}${reachable}${tags}${description ? `: ${description}` : ''}${topic}${sessionHint}`
           })
           return (
             'Colleague agents you can ask with ask_peer (one) or ask_peers (several), ' +
@@ -121,13 +158,28 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
                 }
               }
             }
+            const parts: SessionTextPart[] = []
+            for (const event of session.events) {
+              if (event.type === 'user/message') {
+                const source = event.data.source
+                if (source?.kind === 'plugin' && source.plugin === '@deepseek-ai/dsh-system-prompt') continue
+                const text = textFromBlocks(event.data.content)
+                if (text.length > 0) parts.push({ text, source: 'user' })
+              } else if (event.type === 'assistant/message') {
+                const text = stripMarkup(textFromBlocks(event.data.message.content))
+                if (text.length > 0) parts.push({ text, source: 'assistant' })
+              }
+            }
+            const topic = topicOf(parts)
+            const topics = topicsOfRecent(parts)
             const last = session.events.at(-1)
             return {
               id: String(session.id),
               workspace: session.header.cwd !== undefined ? basename(session.header.cwd) : '',
               createdAt: session.header.createdAt,
               ...(title !== undefined ? { title } : {}),
-              ...(title !== undefined ? { topics: topicsOf(title) } : {}),
+              ...(topic !== '' ? { topic } : {}),
+              ...(topics.length > 0 ? { topics } : {}),
               ...(last !== undefined ? { updatedAt: last.time } : {}),
             }
           })

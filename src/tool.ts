@@ -110,6 +110,7 @@ function registerPeersList(ctx: Context, registry: PeerRegistry): void {
             properties: {
               peer: { type: 'string', required: true },
               description: { type: 'string', required: true },
+              topic: { type: 'string', required: true },
               tags: { type: 'array', items: { type: 'string' }, required: true },
               workspace: { type: 'string', required: true },
               reachable: { type: 'boolean', required: true },
@@ -125,6 +126,7 @@ function registerPeersList(ctx: Context, registry: PeerRegistry): void {
                     workspace: { type: 'string', required: true },
                     createdAt: { type: 'number', required: true },
                     title: { type: 'string', required: true },
+                    topic: { type: 'string', required: true },
                     topics: { type: 'array', items: { type: 'string' }, required: true },
                     updatedAt: { type: 'number', required: true },
                   },
@@ -142,14 +144,15 @@ function registerPeersList(ctx: Context, registry: PeerRegistry): void {
                 const reachable = entry.reachable ? '' : ' (unreachable)'
                 const description = entry.description ? `: ${entry.description}` : ''
                 const workspace = entry.workspace ? ` (workspace: ${entry.workspace})` : ''
+                const topic = entry.topic ? ` — working on: ${entry.topic}` : ''
                 const seen = entry.lastSeen ? ` (seen ${entry.lastSeen})` : ''
                 const sessions =
                   entry.sessions.length > 0
                     ? ` (${entry.sessions.length} session${entry.sessions.length === 1 ? '' : 's'}: ${entry.sessions
-                        .map((s) => s.title || s.id.slice(0, 8))
+                        .map((s) => s.topic || s.title || s.id.slice(0, 8))
                         .join('; ')})`
                     : ''
-                return `- ${entry.peer}${reachable}${tagList}${description}${workspace}${sessions}${seen}`
+                return `- ${entry.peer}${reachable}${tagList}${description}${workspace}${topic}${sessions}${seen}`
               })
               .join('\n'),
           },
@@ -159,6 +162,8 @@ function registerPeersList(ctx: Context, registry: PeerRegistry): void {
         return registry.list().map((entry) => ({
           peer: entry.peer.name,
           description: entry.advert?.description ?? entry.peer.description ?? '',
+          topic:
+            (entry.advert?.sessions ?? []).map((s) => s.topic).find((t) => t !== undefined && t !== '') ?? '',
           tags: entry.advert?.tags ?? [],
           workspace: entry.advert?.workspace ?? '',
           reachable: entry.reachable,
@@ -168,6 +173,7 @@ function registerPeersList(ctx: Context, registry: PeerRegistry): void {
             workspace: s.workspace,
             createdAt: s.createdAt,
             title: s.title ?? '',
+            topic: s.topic ?? '',
             topics: s.topics ?? [],
             updatedAt: s.updatedAt ?? 0,
           })),

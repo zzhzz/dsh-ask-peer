@@ -198,9 +198,9 @@ echo "carol session: $CAROL_SID"
 
 log "waiting for auto-generated session titles"
 for _ in $(seq 1 30); do
-  A_TITLE="$(curl -s http://127.0.0.1:3877/advertise | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);const t=(j.sessions??[]).find(x=>x.id==='$ADA_SID')?.title||'';process.stdout.write(t)})")"
-  C_TITLE="$(curl -s http://127.0.0.1:3879/advertise | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);const t=(j.sessions??[]).find(x=>x.id==='$CAROL_SID')?.title||'';process.stdout.write(t)})")"
-  if [ -n "$A_TITLE" ] && [ -n "$C_TITLE" ]; then break; fi
+  A_TOPICS="$(curl -s http://127.0.0.1:3877/advertise | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);const t=(j.sessions??[]).find(x=>x.id==='$ADA_SID')?.topics||[];process.stdout.write(t.join(' '))})")"
+  C_TOPICS="$(curl -s http://127.0.0.1:3879/advertise | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);const t=(j.sessions??[]).find(x=>x.id==='$CAROL_SID')?.topics||[];process.stdout.write(t.join(' '))})")"
+  if [ -n "$A_TOPICS" ] && [ -n "$C_TOPICS" ]; then break; fi
   sleep 2
 done
 
@@ -210,14 +210,14 @@ curl -s http://127.0.0.1:3877/advertise | node -e "let s='';process.stdin.on('da
 echo "-- carol advert --"
 curl -s http://127.0.0.1:3879/advertise | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log(JSON.stringify(j.sessions,null,1))})"
 
-echo "ada title: $A_TITLE"
-echo "carol title: $C_TITLE"
+echo "ada topics: $A_TOPICS"
+echo "carol topics: $C_TOPICS"
 
 log "bob's choosing task (real model)"
 OUT="$(DSH_HOME="$DSH_HOME" dsh --profile bob "A colleague wants to stand up the docker-compose service in the ada-proj workspace. Call peers_list, pick the peer whose advertisement best matches this need, then ask that peer with ask_peer how to do it. Return the answer verbatim.")"
 printf '%s\n' "$OUT"
 
 echo "== assertions =="
-if grep -qi 'docker\|compose' <<<"$A_TITLE"; then echo "PASS: ada advert title mentions docker/compose"; else echo "WARN: ada title: $A_TITLE"; fi
-if grep -qi 'postgres\|database\|migrat' <<<"$C_TITLE"; then echo "PASS: carol advert title mentions postgres/db"; else echo "WARN: carol title: $C_TITLE"; fi
-if grep -q 'ada' <<<"$OUT" && ! grep -q 'postgres' <<<"$OUT"; then echo "PASS: bob chose ada and the answer is docker-flavored"; else echo "CHECK: bob output above (expected ada/docker answer, no postgres)"; fi
+if grep -qi 'docker\|compose' <<<"$A_TOPICS"; then echo "PASS: ada advert topics mention docker/compose"; else echo "WARN: ada topics: $A_TOPICS"; fi
+if grep -qi 'postgres\|database\|migrat' <<<"$C_TOPICS"; then echo "PASS: carol advert topics mention postgres/db"; else echo "WARN: carol topics: $C_TOPICS"; fi
+if grep -qi 'docker\|compose' <<<"$OUT" && ! grep -qi 'postgres\|database\|migrat' <<<"$OUT"; then echo "PASS: bob chose ada and the answer is docker-flavored"; else echo "CHECK: bob output above (expected docker answer from ada, no postgres)"; fi
