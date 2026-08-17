@@ -2,6 +2,24 @@
   "name": "dsh-ask-peer",
   "version": "0.1.0",
   "description": "Peer-to-peer 'ask a colleague's agent' plugin for DeepSeek Harness",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "p2p",
+    "agent-collaboration",
+    "lan",
+    "ask-peer",
+    "agents"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zzhzz/dsh-ask-peer.git"
+  },
+  "homepage": "https://github.com/zzhzz/dsh-ask-peer",
+  "bugs": {
+    "url": "https://github.com/zzhzz/dsh-ask-peer/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -20,8 +38,12 @@
     "lib",
     "cordis.patch.yml"
   ],
+  "sideEffects": [
+    "./lib/client.js"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json && tsdown",
+    "prepare": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bundle": "tsdown",
     "mock:llm": "node scripts/mock-llm.mjs",
@@ -42,6 +64,13 @@
     }
   },
   "license": "MIT",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "pnpm": ">=10"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@deepseek-ai/dsh-sandbox-policy": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1"
