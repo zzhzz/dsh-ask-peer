@@ -12,6 +12,7 @@ import { startRosterRefresh } from './roster.ts'
 import { listPendingAsks, serverBaseUrl, startAskServer, type LiveAdvert } from './server.ts'
 import {
   loadSettings,
+  localFromConfig,
   saveSettings,
   type AskPeerSettings,
   type StoredSettings,
@@ -84,7 +85,11 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
     description: config.description,
     tags: config.tags,
     peers: config.peers,
+    local: localFromConfig(config),
   })
+  // Effective runtime config: profile patch is the bootstrap, the settings
+  // file (editable from the settings page) wins for every UI-owned knob.
+  const runtime: AskPeerConfig = { ...config, ...stored.settings.local }
   const registry = new PeerRegistry(stored.settings.peers)
   const identity = loadOrCreateIdentity(config.keyDir, config.callerName)
   const live: LiveAdvert = {
@@ -97,11 +102,12 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
     live.description = settings.description
     live.tags = settings.tags
     registry.replacePeers(settings.peers)
+    Object.assign(runtime, settings.local)
   }
   applySettings(stored.settings)
 
-  registerAskTools(ctx, registry, config, identity)
-  startRosterRefresh(ctx, registry, config)
+  registerAskTools(ctx, registry, runtime, identity)
+  startRosterRefresh(ctx, registry, runtime)
 
   // Live roster guidance: every agent sees its available friends (name,
   // reachability, advertised tags/description) and is told to pick by them.
@@ -142,7 +148,7 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
 
   if (config.listen) {
     ctx.effect(() => {
-      const dispose = startAskServer(ctx, config, identity, () => live, {
+      const dispose = startAskServer(ctx, runtime, identity, () => live, {
         getToken: () => uiToken,
         getPeers: () => registry.list().map((entry) => entry.peer),
         getSessions: (): SessionAdvert[] => {
@@ -205,7 +211,7 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
         handler: (_req, res) => {
           res.writeHead(200, { 'content-type': 'application/json' })
           res.end(JSON.stringify({
-            serverUrl: serverBaseUrl(config),
+            serverUrl: serverBaseUrl(runtime),
             identity: {
               publicKey: identity.publicKey,
               fingerprint: shortSign(identity.publicKey),
@@ -219,7 +225,7 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
         path: '/ask-peer/pending',
         handler: (_req, res) => {
           res.writeHead(200, { 'content-type': 'application/json' })
-          res.end(JSON.stringify(listPendingAsks(config)))
+          res.end(JSON.stringify(listPendingAsks(runtime)))
         },
       })
       return () => {

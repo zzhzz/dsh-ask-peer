@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { PeerConfig } from '../config.ts'
-import type { AskPeerSettings } from '../settings.ts'
+import type { AskPeerSettings, LocalSettings } from '../settings.ts'
 
 type FriendMode = 'ask' | 'auto' | 'deny'
 
@@ -11,6 +11,7 @@ interface FriendDraft {
   token: string
   publicKey: string
   mode: FriendMode
+  description: string
 }
 
 const styles: Record<string, React.CSSProperties> = {
@@ -29,7 +30,7 @@ const styles: Record<string, React.CSSProperties> = {
 }
 
 function emptyFriend(): FriendDraft {
-  return { name: '', host: '', port: 3877, token: '', publicKey: '', mode: 'ask' }
+  return { name: '', host: '', port: 3877, token: '', publicKey: '', mode: 'ask', description: '' }
 }
 
 function toDraft(peer: PeerConfig): FriendDraft {
@@ -40,6 +41,7 @@ function toDraft(peer: PeerConfig): FriendDraft {
     token: peer.token ?? '',
     publicKey: peer.publicKey ?? '',
     mode: peer.mode ?? 'ask',
+    description: peer.description ?? '',
   }
 }
 
@@ -51,6 +53,7 @@ function toPeer(draft: FriendDraft): PeerConfig {
     ...(draft.token !== '' ? { token: draft.token } : {}),
     ...(draft.publicKey !== '' ? { publicKey: draft.publicKey } : {}),
     mode: draft.mode,
+    ...(draft.description !== '' ? { description: draft.description } : {}),
   }
 }
 
@@ -68,14 +71,20 @@ interface ConfigDocument {
 export function AskPeerSettingsSection() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [description, setDescription] = useState('')
   const [tagsText, setTagsText] = useState('')
   const [friends, setFriends] = useState<FriendDraft[]>([])
   const [draft, setDraft] = useState<FriendDraft>(emptyFriend())
+  const [local, setLocal] = useState<LocalSettings | null>(null)
+  const [card, setCard] = useState('')
+  const [cardExpires, setCardExpires] = useState('')
+  const [pasteCard, setPasteCard] = useState('')
   const [identity, setIdentity] = useState<{ publicKey: string; fingerprint: string } | null>(null)
   const [token, setToken] = useState('')
   const [serverUrl, setServerUrl] = useState('')
   const [copied, setCopied] = useState(false)
+  const [copiedCard, setCopiedCard] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const load = async (): Promise<void> => {
@@ -94,9 +103,21 @@ export function AskPeerSettingsSection() {
       setDescription(document.settings.description ?? '')
       setTagsText((document.settings.tags ?? []).join(', '))
       setFriends((document.settings.peers ?? []).map(toDraft))
+      setLocal(document.settings.local)
+
+      const cardResponse = await fetch(`${config.serverUrl}/sign/card`)
+      if (cardResponse.ok) {
+        const cardDocument = (await cardResponse.json()) as { card: string; expiresAt: number }
+        setCard(cardDocument.card)
+        setCardExpires(new Date(cardDocument.expiresAt).toLocaleString())
+      } else {
+        setCard('')
+        setCardExpires('')
+      }
       setStatus('ready')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
+      setNotice(null)
       setStatus('error')
     }
   }
@@ -118,10 +139,12 @@ export function AskPeerSettingsSection() {
             description,
             tags: tagsText.split(',').map((s) => s.trim()).filter((s) => s !== ''),
             peers: friends.map(toPeer),
+            local: local ?? undefined,
           },
         }),
       })
       if (!response.ok) throw new Error(`save rejected (HTTP ${response.status})`)
+      setNotice('Saved.')
       await load()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -136,6 +159,53 @@ export function AskPeerSettingsSection() {
     if (name === '' || host === '') return
     setFriends([...friends, { ...draft, name, host }])
     setDraft(emptyFriend())
+  }
+
+  const copyCard = async (): Promise<void> => {
+    if (card === '') return
+    try {
+      await navigator.clipboard.writeText(card)
+      setCopiedCard(true)
+      setTimeout(() => setCopiedCard(false), 1500)
+    } catch {
+      setError('clipboard unavailable')
+    }
+  }
+
+  const decodeCard = async (): Promise<void> => {
+    const value = pasteCard.trim()
+    if (value === '' || serverUrl === '') return
+    setError(null)
+    setNotice(null)
+    try {
+      const response = await fetch(`${serverUrl}/sign/verify`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ card: value }),
+      })
+      const result = (await response.json()) as
+        | { ok: true; peer: { name: string; host: string; port: number; publicKey: string; description?: string } }
+        | { ok: false; reason: string }
+      if (result.ok) {
+        setDraft({
+          name: result.peer.name,
+          host: result.peer.host,
+          port: result.peer.port,
+          token: '',
+          publicKey: result.peer.publicKey,
+          mode: 'ask',
+          description: result.peer.description ?? '',
+        })
+        setPasteCard('')
+        setNotice(`Friend card from ${result.peer.name} verified. Review the details and press Add.`)
+      } else {
+        setNotice(null)
+        setError(`Friend card rejected: ${result.reason}`)
+      }
+    } catch (cause) {
+      setNotice(null)
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
   }
 
   const copySign = async (): Promise<void> => {
@@ -171,6 +241,31 @@ export function AskPeerSettingsSection() {
       </div>
 
       <div style={styles.block}>
+        <div style={styles.heading}>My friend card</div>
+        <div style={styles.row}>
+          <div style={styles.wide}>
+            <div style={styles.label}>
+              One signed blob with everything friends need (name, host, port, sign, about).
+              Friends paste it into “Add friend from a card” below.
+            </div>
+            {card !== '' ? (
+              <>
+                <div style={styles.mono}>{card}</div>
+                <div style={styles.muted}>valid until {cardExpires}</div>
+              </>
+            ) : (
+              <div style={styles.muted}>card unavailable (inbound ask server not running?)</div>
+            )}
+          </div>
+          {card !== '' ? (
+            <button type="button" style={styles.button} onClick={() => void copyCard()}>
+              {copiedCard ? 'Copied' : 'Copy'}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div style={styles.block}>
         <div style={styles.heading}>About this agent</div>
         <div style={styles.row}>
           <input
@@ -186,6 +281,110 @@ export function AskPeerSettingsSection() {
             onChange={(event) => setTagsText(event.target.value)}
           />
         </div>
+      </div>
+
+      <div style={styles.block}>
+        <div style={styles.heading}>Local agent settings</div>
+        <div style={styles.row}>
+          <input
+            style={{ ...styles.input, width: 120 }}
+            value={local?.listenHost ?? ''}
+            placeholder="listen host"
+            onChange={(event) => setLocal({ ...local!, listenHost: event.target.value })}
+          />
+          <input
+            style={{ ...styles.input, width: 70 }}
+            type="number"
+            value={local?.listenPort ?? 3877}
+            placeholder="listen port"
+            onChange={(event) => setLocal({ ...local!, listenPort: Number(event.target.value) })}
+          />
+          <label style={styles.label}>
+            <input
+              type="checkbox"
+              checked={local?.requireToken ?? true}
+              onChange={(event) => setLocal({ ...local!, requireToken: event.target.checked })}
+            />{' '}
+            require token
+          </label>
+        </div>
+        <div style={{ ...styles.row, marginTop: 6 }}>
+          <input
+            style={{ ...styles.input, ...styles.wide }}
+            value={local?.workspace ?? ''}
+            placeholder="answering workspace (absolute path)"
+            onChange={(event) => setLocal({ ...local!, workspace: event.target.value })}
+          />
+        </div>
+        <div style={{ ...styles.row, marginTop: 6 }}>
+          <input
+            style={{ ...styles.input, width: 160 }}
+            value={local?.provider ?? ''}
+            placeholder="provider override (optional)"
+            onChange={(event) => setLocal({ ...local!, provider: event.target.value })}
+          />
+          <input
+            style={{ ...styles.input, width: 140 }}
+            value={local?.model ?? ''}
+            placeholder="model override (optional)"
+            onChange={(event) => setLocal({ ...local!, model: event.target.value })}
+          />
+          <input
+            style={{ ...styles.input, width: 110 }}
+            type="number"
+            value={local?.timeoutMs ?? 120000}
+            placeholder="ask timeout ms"
+            onChange={(event) => setLocal({ ...local!, timeoutMs: Number(event.target.value) })}
+          />
+        </div>
+        <div style={{ ...styles.row, marginTop: 6 }}>
+          <input
+            style={{ ...styles.input, width: 120 }}
+            type="number"
+            value={local?.maxAnswerChars ?? 48000}
+            placeholder="answer cap chars"
+            onChange={(event) => setLocal({ ...local!, maxAnswerChars: Number(event.target.value) })}
+          />
+          <input
+            style={{ ...styles.input, width: 130 }}
+            type="number"
+            value={local?.approvalTimeoutMs ?? 120000}
+            placeholder="approval timeout ms"
+            onChange={(event) => setLocal({ ...local!, approvalTimeoutMs: Number(event.target.value) })}
+          />
+          <input
+            style={{ ...styles.input, width: 110 }}
+            type="number"
+            value={local?.rosterRefreshMs ?? 60000}
+            placeholder="roster refresh ms"
+            onChange={(event) => setLocal({ ...local!, rosterRefreshMs: Number(event.target.value) })}
+          />
+          <label style={styles.label}>
+            <input
+              type="checkbox"
+              checked={local?.allowExecution ?? false}
+              onChange={(event) => setLocal({ ...local!, allowExecution: event.target.checked })}
+            />{' '}
+            allow execution
+          </label>
+        </div>
+        <div style={styles.muted}>host/port changes apply after the profile restarts.</div>
+      </div>
+
+      <div style={styles.block}>
+        <div style={styles.heading}>Add friend from a card</div>
+        <div style={styles.row}>
+          <input
+            style={{ ...styles.input, flex: 1, minWidth: 220 }}
+            value={pasteCard}
+            placeholder="paste a dsh-ask-peer-card:… signature"
+            onChange={(event) => setPasteCard(event.target.value)}
+          />
+          <button type="button" style={styles.button} onClick={() => void decodeCard()}>
+            Verify & fill
+          </button>
+        </div>
+        <div style={styles.muted}>the card is verified against the key embedded in it, then pre-fills the friend form.</div>
       </div>
 
       <div style={styles.block}>
@@ -267,9 +466,13 @@ export function AskPeerSettingsSection() {
             Add
           </button>
         </div>
+        {draft.description !== '' ? (
+          <div style={{ ...styles.muted, marginTop: 6 }}>note: {draft.description}</div>
+        ) : null}
       </div>
 
       {error !== null ? <div style={styles.error}>{error}</div> : null}
+      {notice !== null ? <div style={styles.muted}>{notice}</div> : null}
       <div style={styles.row}>
         <button
           type="button"

@@ -12,6 +12,8 @@ export const ADVERTISE_PATH = '/advertise'
 export const IDENTITY_PATH = '/identity'
 export const SETTINGS_PATH = '/settings'
 export const STATUS_PATH = '/ask/status'
+export const SIGN_CARD_PATH = '/sign/card'
+export const SIGN_VERIFY_PATH = '/sign/verify'
 
 /** One of the answering agent's sessions, advertised for session-level asks. */
 export interface SessionAdvert {

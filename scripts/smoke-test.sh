@@ -315,6 +315,61 @@ code="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3878/set
   --data @"$SMOKE_DIR/settings-payload.json")"
 [ "$code" = "200" ] || { echo "expected 200 for valid settings write, got $code" >&2; exit 1; }
 
+log "settings: GET /settings exposes the UI-editable local block"
+curl -sf http://127.0.0.1:3878/settings | grep -q '"local"' || {
+  echo "settings endpoint did not expose the local block" >&2
+  exit 1
+}
+
+log "settings: local listenPort round-trips through the settings channel"
+node -e "
+  const fs = require('node:fs')
+  const doc = JSON.parse(fs.readFileSync('$SMOKE_DIR/settings.json', 'utf8'))
+  doc.settings.local.listenPort = 3898
+  fs.writeFileSync('$SMOKE_DIR/settings-local.json', JSON.stringify({ token: doc.uiToken, settings: doc.settings }))
+"
+code="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3878/settings \
+  -H 'content-type: application/json' \
+  --data @"$SMOKE_DIR/settings-local.json")"
+[ "$code" = "200" ] || { echo "expected 200 for local settings write, got $code" >&2; exit 1; }
+curl -sf http://127.0.0.1:3878/settings | grep -q '3898' || {
+  echo "local listenPort change was not persisted" >&2
+  exit 1
+}
+node -e "
+  const fs = require('node:fs')
+  const doc = JSON.parse(fs.readFileSync('$SMOKE_DIR/settings.json', 'utf8'))
+  fs.writeFileSync('$SMOKE_DIR/settings-restore.json', JSON.stringify({ token: doc.uiToken, settings: doc.settings }))
+"
+code="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3878/settings \
+  -H 'content-type: application/json' \
+  --data @"$SMOKE_DIR/settings-restore.json")"
+[ "$code" = "200" ] || { echo "expected 200 restoring settings, got $code" >&2; exit 1; }
+
+log "card: GET /sign/card returns a signed friend card"
+CARD="$(curl -sf http://127.0.0.1:3878/sign/card | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).card))")"
+case "$CARD" in
+  dsh-ask-peer-card:*) ;;
+  *) echo "card prefix missing" >&2; exit 1 ;;
+esac
+
+log "card: the valid card decodes and verifies"
+curl -sf -X POST http://127.0.0.1:3878/sign/verify \
+  -H 'content-type: application/json' \
+  -d "{\"card\":\"$CARD\"}" | grep -q '"ok":true' || {
+  echo "valid friend card was rejected" >&2
+  exit 1
+}
+
+log "card: a tampered card must be rejected"
+TAMPERED="$(node -e "const c=process.argv[1];const i=Math.floor(c.length/2);const ch=c[i]==='A'?'B':'A';process.stdout.write(c.slice(0,i)+ch+c.slice(i+1))" "$CARD")"
+curl -sf -X POST http://127.0.0.1:3878/sign/verify \
+  -H 'content-type: application/json' \
+  -d "{\"card\":\"$TAMPERED\"}" | grep -q '"ok":false' || {
+  echo "tampered friend card was accepted" >&2
+  exit 1
+}
+
 log "async: an unknown askId must 404"
 code="$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3878/ask/status?askId=nonexistent')"
 [ "$code" = "404" ] || { echo "expected 404 for unknown askId, got $code" >&2; exit 1; }

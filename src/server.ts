@@ -6,6 +6,7 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import type { Config, PeerConfig } from './config.ts'
 import type { AskDecisionData, AskRequestData, AskResultData } from './events.ts'
 import { canonicalJson, shortSign, signPayload, verifyPayload, type Identity } from './identity.ts'
+import { buildFriendCard, verifyFriendCard } from './card.ts'
 import {
   ADVERTISE_PATH,
   ASK_PATH,
@@ -14,6 +15,8 @@ import {
   IDENTITY_PATH,
   SETTINGS_PATH,
   STATUS_PATH,
+  SIGN_CARD_PATH,
+  SIGN_VERIFY_PATH,
   PROTOCOL_VERSION,
   type Advert,
   type AskStatus,
@@ -25,7 +28,7 @@ import {
   type AskResponse,
 } from './protocol.ts'
 import { runQuestion } from './run.ts'
-import type { AskPeerSettings } from './settings.ts'
+import { localFromConfig, type AskPeerSettings, type LocalSettings } from './settings.ts'
 
 const MAX_BODY_BYTES = 1024 * 1024
 const ASK_RESULT_TTL_MS = 10 * 60 * 1000
@@ -151,6 +154,7 @@ async function handleRequest(
         description: live().description,
         tags: live().tags,
         peers: hooks.getPeers(),
+        local: localFromConfig(config),
       },
       serverUrl: serverBaseUrl(config),
       identity: {
@@ -163,7 +167,38 @@ async function handleRequest(
   }
 
   if (req.method === 'POST' && url.pathname === SETTINGS_PATH) {
-    await handleSettingsWrite(req, res, hooks)
+    await handleSettingsWrite(req, res, hooks, localFromConfig(config))
+    return
+  }
+
+  if (req.method === 'GET' && url.pathname === SIGN_CARD_PATH) {
+    // Wildcard binds are not reachable addresses; fall back to loopback so a
+    // card is always usable locally. For LAN friends, set the LAN IP in the
+    // settings page and the card will carry it.
+    const host =
+      config.listenHost === '0.0.0.0' || config.listenHost === '::' ? '127.0.0.1' : config.listenHost
+    const card = buildFriendCard(identity, {
+      name: config.callerName,
+      host,
+      port: config.listenPort,
+      description: live().description,
+      tags: live().tags,
+    })
+    const parsed = verifyFriendCard(card)
+    const expiresAt = parsed.ok ? parsed.payload.issued + (parsed.payload.ttl ?? 0) : Date.now()
+    sendJson(res, 200, {
+      card,
+      name: config.callerName,
+      host,
+      port: config.listenPort,
+      publicKey: identity.publicKey,
+      expiresAt,
+    })
+    return
+  }
+
+  if (req.method === 'POST' && url.pathname === SIGN_VERIFY_PATH) {
+    await handleSignVerify(req, res)
     return
   }
 
@@ -458,7 +493,12 @@ async function handleStatus(req: IncomingMessage, res: ServerResponse): Promise<
   sendJson(res, 200, body)
 }
 
-async function handleSettingsWrite(req: IncomingMessage, res: ServerResponse, hooks: AskServerHooks): Promise<void> {
+async function handleSettingsWrite(
+  req: IncomingMessage,
+  res: ServerResponse,
+  hooks: AskServerHooks,
+  fallbackLocal: LocalSettings,
+): Promise<void> {
   let body: { token?: unknown; settings?: unknown }
   try {
     body = JSON.parse(await readBody(req, MAX_BODY_BYTES)) as typeof body
@@ -470,9 +510,9 @@ async function handleSettingsWrite(req: IncomingMessage, res: ServerResponse, ho
     sendJson(res, 403, errorResponse('forbidden', 'invalid settings token'))
     return
   }
-  const settings = sanitizeSettings(body.settings)
+  const settings = sanitizeSettings(body.settings, fallbackLocal)
   if (settings === undefined) {
-    sendJson(res, 400, errorResponse('bad_request', 'settings must be an object with description, tags, and peers'))
+    sendJson(res, 400, errorResponse('bad_request', 'settings must be an object with description, tags, peers, and local'))
     return
   }
   hooks.onUpdate(settings)
@@ -482,7 +522,7 @@ async function handleSettingsWrite(req: IncomingMessage, res: ServerResponse, ho
 const FRIEND_MODES = new Set(['ask', 'auto', 'deny'])
 
 /** Defensive parse of the browser-submitted settings section. */
-function sanitizeSettings(value: unknown): AskPeerSettings | undefined {
+function sanitizeSettings(value: unknown, fallbackLocal: LocalSettings): AskPeerSettings | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const raw = value as Record<string, unknown>
   const description = typeof raw.description === 'string' ? raw.description : ''
@@ -507,7 +547,63 @@ function sanitizeSettings(value: unknown): AskPeerSettings | undefined {
       ...typeof peer.description === 'string' && peer.description !== '' ? { description: peer.description } : {},
     })
   }
-  return { description, tags, peers }
+  return {
+    description,
+    tags,
+    peers,
+    local: sanitizeLocal(raw.local, fallbackLocal),
+  }
+}
+
+/** Defensive parse of the UI-editable runtime knobs; invalid fields keep current values. */
+function sanitizeLocal(value: unknown, fallback: LocalSettings): LocalSettings {
+  if (typeof value !== 'object' || value === null) return { ...fallback }
+  const raw = value as Record<string, unknown>
+  const provider = typeof raw.provider === 'string' && raw.provider !== '' ? raw.provider : fallback.provider
+  const model = typeof raw.model === 'string' && raw.model !== '' ? raw.model : fallback.model
+  return {
+    listenHost:
+      typeof raw.listenHost === 'string' && raw.listenHost !== '' ? raw.listenHost : fallback.listenHost,
+    listenPort:
+      typeof raw.listenPort === 'number' && raw.listenPort > 0 && raw.listenPort < 65536
+        ? raw.listenPort
+        : fallback.listenPort,
+    requireToken: typeof raw.requireToken === 'boolean' ? raw.requireToken : fallback.requireToken,
+    workspace: typeof raw.workspace === 'string' && raw.workspace !== '' ? raw.workspace : fallback.workspace,
+    ...(provider !== undefined ? { provider } : {}),
+    ...(model !== undefined ? { model } : {}),
+    timeoutMs: typeof raw.timeoutMs === 'number' && raw.timeoutMs > 0 ? raw.timeoutMs : fallback.timeoutMs,
+    maxAnswerChars:
+      typeof raw.maxAnswerChars === 'number' && raw.maxAnswerChars > 0
+        ? raw.maxAnswerChars
+        : fallback.maxAnswerChars,
+    approvalTimeoutMs:
+      typeof raw.approvalTimeoutMs === 'number' && raw.approvalTimeoutMs > 0
+        ? raw.approvalTimeoutMs
+        : fallback.approvalTimeoutMs,
+    allowExecution: typeof raw.allowExecution === 'boolean' ? raw.allowExecution : fallback.allowExecution,
+    rosterRefreshMs:
+      typeof raw.rosterRefreshMs === 'number' && raw.rosterRefreshMs >= 0
+        ? raw.rosterRefreshMs
+        : fallback.rosterRefreshMs,
+  }
+}
+
+/** Verify a pasted friend card and return the friend fields for pre-filling. */
+async function handleSignVerify(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  let body: { card?: unknown }
+  try {
+    body = JSON.parse(await readBody(req, MAX_BODY_BYTES)) as typeof body
+  } catch {
+    sendJson(res, 400, errorResponse('bad_request', 'request body must be JSON'))
+    return
+  }
+  if (typeof body.card !== 'string' || body.card.trim() === '') {
+    sendJson(res, 400, errorResponse('bad_request', 'card is required'))
+    return
+  }
+  const result = verifyFriendCard(body.card.trim())
+  sendJson(res, 200, result)
 }
 
 /** Run an async ask in the background: approval (when required), then answer. */

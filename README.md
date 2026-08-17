@@ -50,11 +50,21 @@ server:
    lands in the bubble as `ask/result`.
 7. **Settings page (Web UI)** — the plugin registers an "Ask Peer" page in
    dsh's Settings: copy your sign (the public key — the private key stays on
-   disk), edit your advertised description/tags, and manage friends (add by
-   sign, per-friend `ask`/`auto`/`deny` mode, remove). Changes persist to
-   `<keyDir>/settings-<callerName>.json` and apply live without a restart.
-   (dsh rc.6 only exposes allowlisted namespaces to the web settings API, so
-   the plugin serves its settings through its own HTTP endpoints instead.)
+   disk), edit your advertised description/tags, manage friends, and tune the
+   local runtime knobs (listen host/port, workspace, timeouts, answer cap,
+   roster refresh, allow-execution, provider/model overrides). The page also
+   shows your **friend card**: one signed blob containing your name, host,
+   port, sign, and about-text. A colleague pastes your card into "Add friend
+   from a card"; the plugin verifies the signature against the key embedded in
+   it and pre-fills the friend entry, so adding a friend is a single copy-paste
+   instead of copying host/port/sign separately. The card is signed rather
+   than encrypted: the embedded key is public by nature, and the signature is
+   what proves the contact info came from the holder of the matching private
+   key (and was not tampered with). Changes persist to
+   `<keyDir>/settings-<callerName>.json` and apply live without a restart
+   (host/port take effect after the profile restarts). (dsh rc.6 only exposes
+   allowlisted namespaces to the web settings API, so the plugin serves its
+   settings through its own HTTP endpoints instead.)
 8. **Backlogged asks** — `ask_peer_async(peer, question, …)` queues a question
    and returns an `askId` immediately; the answerer produces the answer in the
    background (approval still applies in `ask` mode), and `ask_result(peer,
@@ -81,12 +91,13 @@ relationship, and the protocol is one JSON document both sides already speak.
 | `src/peer-client.ts` | Outbound ask over HTTP (host half) |
 | `src/events.ts` | The replayable ask event family (`ask/request` / `decision` / `result`) |
 | `src/roster.ts` | Periodic advertisement refresh |
-| `src/server.ts` | Inbound server: validation, allowlist, token check |
+| `src/server.ts` | Inbound server: validation, allowlist, token check, settings + friend-card endpoints |
 | `src/run.ts` | Runs one question in a fresh agent, collects the answer |
 | `src/tool.ts` | `ask_peer`, `peers_list`, and `ask_peers` tools |
+| `src/card.ts` | Signed friend cards (build/parse/verify for one-paste friend adding) |
 | `src/client/` | Browser half: the ask conversation node + bubble renderer |
-| `src/client/AskPeerSettings.tsx` | The Ask Peer settings page (sign copy, friends) |
-| `src/settings.ts` | The `ask-peer` settings namespace (hot-reloaded) |
+| `src/client/AskPeerSettings.tsx` | The Ask Peer settings page (sign + friend card, local knobs, friends) |
+| `src/settings.ts` | The `ask-peer` settings namespace incl. UI-editable local knobs (hot-reloaded) |
 | `tsdown.config.ts` | Builds `lib/client.js` (the browser bundle) |
 | `cordis.patch.yml` | Bundle layer that inserts the plugin row |
 
@@ -106,9 +117,12 @@ dsh --profile demo
 browser bundle (`lib/client.js`, discovered automatically by the web app via
 the package's `dsh.client` declaration).
 
-Then override the row in your profile's `cordis.patch.yml` with your identity,
-peers, and listen settings (a later layer replaces the whole `config` value, so
-restate every key):
+Only the bootstrap settings are required in the profile's `cordis.patch.yml`:
+your identity (`callerName`, `keyDir`) and `listen: true` to start the inbound
+ask server. Everything else — host, port, workspace, timeouts, description,
+tags, friends, and per-friend mode — is editable from the Web UI and stored in
+the plugin's settings file; the profile values are just first-run defaults.
+Minimal profile row:
 
 ```yaml
 - id: ask-peer
@@ -116,41 +130,26 @@ restate every key):
     callerName: 'ada'
     keyDir: '/home/ada/.dsh-ask-peer/keys'
     listen: true
-    listenHost: '0.0.0.0'
-    listenPort: 3877
-    requireToken: true
-    workspace: '/home/ada/projects/service'
-    description: 'Ada: microservices and dev-environment setup'
-    tags: ['env-setup', 'docker']
-    rosterRefreshMs: 60000
-    timeoutMs: 120000
-    maxAnswerChars: 48000
-    approvalTimeoutMs: 120000
-    allowExecution: false
-    peers:
-      - name: 'bob'
-        host: '192.168.1.23'
-        port: 3877
-        token: 'shared-secret-bob'
-        publicKey: 'ed25519:9f3b…'
-        mode: 'ask'
 ```
 
-On the other side, Bob runs the same plugin with `callerName: 'bob'`,
-`peers: [{ name: 'ada', host: ..., token: 'shared-secret-bob' }]`, and his own
-`workspace`. Tokens are shared per relationship; they are matched with a
-constant-time comparison on the receiving side. When a peer entry carries a
-`publicKey` (the friend's sign), that key becomes the trust root instead: every
-ask and advertisement must be signed by it, so a friend entry is a verified
-identity rather than a shared secret. Each side generates its own Ed25519
-signing keypair on first run under `keyDir`.
+Every key from the earlier full example is still honored as a profile
+default, and the full list is documented in `src/config.ts`. On the other
+side, Bob runs the same plugin with `callerName: 'bob'` and his own keyDir.
+Tokens are shared per relationship; they are matched with a constant-time
+comparison on the receiving side. When a peer entry carries a `publicKey`
+(the friend's sign), that key becomes the trust root instead: every ask and
+advertisement must be signed by it, so a friend entry is a verified identity
+rather than a shared secret. Each side generates its own Ed25519 signing
+keypair on first run under `keyDir`.
 
 Alternatively, manage all of this in the Web UI: Settings → **Ask Peer**
-(copy sign, edit description/tags, add/remove friends, set per-friend mode).
-Those edits persist to the plugin's own settings file and apply live. The page
-loads through a same-origin config route (`/ask-peer/config`) and reads/writes
-`GET|POST /settings` on the ask server (token-protected); make sure `listen:
-true` is set in the profile so the ask server is reachable.
+(copy your sign or friend card, edit description/tags, add/remove friends by
+card or by hand, set per-friend mode, tune the local knobs). Those edits
+persist to the plugin's own settings file and apply live (host/port after
+restart). The page loads through a same-origin config route
+(`/ask-peer/config`) and reads/writes `GET|POST /settings` on the ask server
+(token-protected); make sure `listen: true` is set in the profile so the ask
+server is reachable.
 
 Each friend has an inbound policy: `ask` (default — the owner is prompted in
 the Web UI before the answering agent runs), `auto` (allowlisted friends run
