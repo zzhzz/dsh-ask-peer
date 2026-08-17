@@ -1,0 +1,6 @@
+allowBuilds:
+  node-pty: true
+  koffi: true
+  protobufjs: true
+  '@google/genai': true
+  '@deepseek-ai/dsh-subprocess-local': true

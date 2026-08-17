@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# build output
+lib/
+dist/
+*.tsbuildinfo
+
+# environment & secrets
+.env
+.env.*
+!.env.example
+
+# logs & test artifacts
+*.log
+coverage/
+
+# macOS
+.DS_Store
