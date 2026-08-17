@@ -1,12 +1,21 @@
 # dsh-ask-peer
 
-Peer-to-peer "ask a colleague's agent" for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh).
+A **decentralized** "ask a colleague's agent" plugin for
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh).
 
-One agent asks another agent — over the LAN, no central server — and gets a
-committed answer from the colleague's own workspace and session context.
+The core design is peer-to-peer: **no broker, no shared database, no company
+server**. Every agent runs its own endpoint and keeps its own copy of the
+relationships, so asking happens directly between two agents over the LAN.
+Unlike central-server integrations (e.g. a Feishu/Slack bot), there is
+nothing in the middle to operate or trust — one agent just asks another and
+gets a committed answer from the colleague's own workspace and session
+context.
 
 ## Features
 
+- **Truly decentralized** — no hub, broker, or shared database; agents talk
+  directly over the LAN and each side keeps its own copy of the
+  relationships.
 - `ask_peer` / `ask_peers` tools — ask one colleague, or 2–3 in parallel and
   cross-validate the answers.
 - Live roster with tags — `peers_list` shows who knows what, so the model
@@ -117,8 +126,9 @@ pnpm web-check     # verifies the web bundle is discovered and served
 When pushing to GitHub, add the **`dsh-plugin`** topic to the repository for
 ecosystem discoverability (About → Topics, or `gh repo edit <owner>/<repo>
 --add-topic dsh-plugin`), plus functional topics such as `deepseek-harness`,
-`dsh`, `p2p`, `agent-collaboration`, `lan`. For npm, `pnpm publish` — the
-`prepare` script builds `lib/` before `pack`/`publish`.
+`dsh`, `p2p`, `peer-to-peer`, `decentralized`, `agent-collaboration`, `lan`.
+For npm, `pnpm publish` — the `prepare` script builds `lib/` before
+`pack`/`publish`.
 
 ## License
 

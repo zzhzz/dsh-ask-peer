@@ -1,12 +1,14 @@
 {
   "name": "dsh-ask-peer",
   "version": "0.1.0",
-  "description": "Peer-to-peer 'ask a colleague's agent' plugin for DeepSeek Harness",
+  "description": "Decentralized peer-to-peer 'ask a colleague's agent' plugin for DeepSeek Harness",
   "keywords": [
     "dsh",
     "dsh-plugin",
     "deepseek-harness",
     "p2p",
+    "peer-to-peer",
+    "decentralized",
     "agent-collaboration",
     "lan",
     "ask-peer",
