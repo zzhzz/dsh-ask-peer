@@ -39,6 +39,16 @@ an interval. The model calls `peers_list` to see who knows what, who is
 reachable, and how fresh the metadata is — then picks deliberately instead of
 guessing.
 
+**Friend discovery.** When no current friend matches, the model can call
+`recommend_peer(peer, topic?)`: the peer's server scores its own friends
+against the topic (live advertised tags/description weigh most), fetches the
+best match's *signed* friend card from the friend itself, and returns it. The
+asking side verifies the card and surfaces it to the owner as a
+`friend/recommend` chat bubble (and a session-independent toast) with
+Add/Decline. On **Add**, the card is re-verified and the recommended agent is
+merged into the friend list (replacing by name) and persisted — the same
+settings channel the Settings page uses.
+
 Answering agents resolve their provider/model from the harness
 `agent-default-model` service (the same default the Web/headless entry points
 use); `config.provider` / `config.model` override it per deployment.
@@ -106,6 +116,13 @@ Errors use `{ "ok": false, "error": { "code", "message" } }` with 400/403/500.
 - `GET /health` → `{ "ok": true, "peer": "<callerName>" }`
 - `GET /advertise` → live roster metadata (name, description, tags, workspace,
   sessions, `updatedAt`)
+- `POST /recommend` → `{ "protocolVersion", "caller", token/sign, "topic"? }`;
+  authenticated like an ask; returns `{ "ok": true, "from", "card" }` with the
+  best-matching friend's signed card (404 when nothing matches)
+- `GET /recommend/pending` → the recommendations waiting for the owner's
+  decision (recId, from, card display fields, decision channel)
+- `POST /friend/decision` → `{ "recId", "token", "decision": "add"|"decline" }`;
+  on `add` the card is re-verified and the peer merged into the friend list
 - `POST /ask/decision` → `{ "askId", "token", "decision" }`; the browser posts
   the owner's approve/decline here (CORS-enabled), with the one-time token
   from the `ask/request` event
@@ -114,7 +131,17 @@ Errors use `{ "ok": false, "error": { "code", "message" } }` with 400/403/500.
 - `GET /sign/card` / `POST /sign/verify` → signed friend-card build/verify
 
 The advertisement is unauthenticated roster metadata (low sensitivity); the
-ask endpoint itself stays protected by the allowlist and token/signature.
+ask/recommend endpoints stay protected by the allowlist and token/signature.
+
+### Event families
+
+The replayable event families the Web client folds into conversation nodes:
+
+- `ask/request` → `ask/decision` → `ask/result` — inbound asks
+  (pending → running → answered / declined)
+- `friend/recommend` → `friend/decision` — friend-card recommendations
+  (pending → added / declined); the decision event is emitted after the
+  settings merge succeeds
 
 ## Security model
 

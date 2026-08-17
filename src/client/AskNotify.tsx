@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { PendingAskView } from '../protocol.ts'
+import type { PendingAskView, PendingRecommendView } from '../protocol.ts'
 import { themeTokens } from './theme.ts'
 
 const styles: Record<string, React.CSSProperties> = {
@@ -23,6 +23,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   header: { fontWeight: 600, marginBottom: 4 },
   question: { whiteSpace: 'pre-wrap', marginBottom: 8, fontSize: 13 },
+  detail: { display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8, fontSize: 12 },
+  mono: { fontFamily: 'monospace', fontSize: 11, color: themeTokens.textSecondary, wordBreak: 'break-all' },
   actions: { display: 'flex', gap: 8 },
   button: {
     padding: '4px 12px',
@@ -46,6 +48,7 @@ const styles: Record<string, React.CSSProperties> = {
  */
 export function AskNotify() {
   const [asks, setAsks] = useState<PendingAskView[]>([])
+  const [friends, setFriends] = useState<PendingRecommendView[]>([])
 
   useEffect(() => {
     let alive = true
@@ -55,6 +58,11 @@ export function AskNotify() {
         if (response.ok) {
           const list = (await response.json()) as PendingAskView[]
           if (alive) setAsks(list)
+        }
+        const friendResponse = await fetch('/ask-peer/pending-friends')
+        if (friendResponse.ok) {
+          const list = (await friendResponse.json()) as PendingRecommendView[]
+          if (alive) setFriends(list)
         }
       } catch {
         // The host may be momentarily unavailable; the next poll retries.
@@ -80,7 +88,20 @@ export function AskNotify() {
     }
   }
 
-  if (asks.length === 0) return null
+  const decideFriend = async (rec: PendingRecommendView, decision: 'add' | 'decline'): Promise<void> => {
+    try {
+      await fetch(rec.decisionUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ recId: rec.recId, token: rec.decisionToken, decision }),
+      })
+      setFriends((current) => current.filter((item) => item.recId !== rec.recId))
+    } catch {
+      // The recommendation expires on its own; the next poll drops it.
+    }
+  }
+
+  if (asks.length === 0 && friends.length === 0) return null
   return (
     <div style={styles.container}>
       {asks.map((ask) => (
@@ -96,6 +117,39 @@ export function AskNotify() {
               Answer
             </button>
             <button type="button" style={styles.button} onClick={() => void decide(ask, 'decline')}>
+              Decline
+            </button>
+          </div>
+        </div>
+      ))}
+      {friends.map((rec) => (
+        <div key={rec.recId} style={styles.card}>
+          <div style={styles.header}>
+            {rec.from} recommends {rec.peer.name}
+          </div>
+          {rec.reason !== undefined ? (
+            <div style={styles.question}>Asked about: {rec.reason}</div>
+          ) : null}
+          <div style={styles.detail}>
+            {rec.peer.description !== undefined && rec.peer.description !== '' ? (
+              <div>{rec.peer.description}</div>
+            ) : null}
+            {rec.peer.tags !== undefined && rec.peer.tags.length > 0 ? (
+              <div>Tags: {rec.peer.tags.join(', ')}</div>
+            ) : null}
+            <div style={styles.mono}>
+              {rec.peer.host}:{rec.peer.port}
+            </div>
+          </div>
+          <div style={styles.actions}>
+            <button
+              type="button"
+              style={{ ...styles.button, ...styles.primary }}
+              onClick={() => void decideFriend(rec, 'add')}
+            >
+              Add friend
+            </button>
+            <button type="button" style={styles.button} onClick={() => void decideFriend(rec, 'decline')}>
               Decline
             </button>
           </div>

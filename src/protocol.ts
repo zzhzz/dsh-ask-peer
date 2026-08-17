@@ -7,6 +7,9 @@
 export const PROTOCOL_VERSION = 1
 export const ASK_PATH = '/ask'
 export const DECISION_PATH = '/ask/decision'
+export const FRIEND_DECISION_PATH = '/friend/decision'
+export const RECOMMEND_PATH = '/recommend'
+export const RECOMMEND_PENDING_PATH = '/recommend/pending'
 export const HEALTH_PATH = '/health'
 export const ADVERTISE_PATH = '/advertise'
 export const IDENTITY_PATH = '/identity'
@@ -90,6 +93,56 @@ export interface AskRequest {
   async?: boolean
 }
 
+/**
+ * Ask a peer to recommend one of its friends (as a signed friend card) that
+ * matches a topic. Authenticated exactly like an ask; the answer is a card
+ * issued by the recommended agent itself, so trust flows through the card's
+ * own signature.
+ */
+export interface RecommendRequest {
+  protocolVersion: number
+  /** Sender identity (the asking side's `callerName`). */
+  caller: string
+  /** Shared secret, required when the peer runs with `requireToken`. */
+  token?: string
+  /** Sender's public sign, present when key-based auth is used. */
+  publicKey?: string
+  /** Signature over the canonical request body, base64url. */
+  signature?: string
+  /** Optional topic the recommendation should match. */
+  topic?: string
+}
+
+export interface RecommendSuccess {
+  ok: true
+  /** The friend who was recommended (their callerName). */
+  from: string
+  /** The recommended agent's signed friend card (`dsh-ask-peer-card:...`). */
+  card: string
+}
+
+/** A recommendation waiting for the owner's Add/Decline decision (web view). */
+export interface PendingRecommendView {
+  recId: string
+  /** The friend who made the recommendation. */
+  from: string
+  /** Display fields of the recommended agent (card already verified host-side). */
+  peer: {
+    name: string
+    host: string
+    port: number
+    publicKey: string
+    description?: string
+    tags?: string[]
+  }
+  /** Optional context: what the recommendation was asked for. */
+  reason?: string
+  /** Where the browser posts the add/decline decision. */
+  decisionUrl: string
+  /** One-time decision token; only the pending view carries it. */
+  decisionToken: string
+}
+
 export interface AskSuccess {
   ok: true
   /** The answering agent's committed text. */
@@ -132,3 +185,13 @@ export const errorResponse = (code: string, message: string): AskFailure => ({
   ok: false,
   error: { code, message },
 })
+
+/**
+ * The base URL of an ask server as a browser/peer can reach it. Wildcard
+ * binds are not reachable addresses, so they fall back to loopback; for LAN
+ * friends, set the LAN IP in the settings page (the card carries it).
+ */
+export function serverBaseUrlFrom(host: string, port: number): string {
+  const safeHost = host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host
+  return `http://${safeHost}:${port}`
+}

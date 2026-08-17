@@ -24,6 +24,9 @@ const ANSWER =
   process.env.MOCK_ANSWER ??
   'Answer: run `make dev` with NODE_ENV=development to stand up the environment.'
 const ASK_PEERS = (process.env.MOCK_ASK_PEERS ?? 'bob,carol').split(',').map((s) => s.trim())
+const RECOMMEND_PEER = process.env.MOCK_RECOMMEND_PEER ?? 'carol'
+const RECOMMEND_TOPIC = process.env.MOCK_RECOMMEND_TOPIC ?? 'dev environment'
+const ASKER_PAUSE_MS = Number(process.env.MOCK_ASKER_PAUSE_MS ?? 4000)
 const DEFAULT_QUESTION = process.env.MOCK_ASK_QUESTION ?? 'How do I stand up the dev environment?'
 const ATTEMPT_WRITE = process.env.MOCK_ATTEMPT_WRITE === '1'
 const ASK_LOOP = process.env.MOCK_ASK_LOOP === '1'
@@ -162,7 +165,7 @@ const server = createServer((req, res) => {
       connection: 'keep-alive',
     })
 
-    // Asker role: peers_list -> ask_peers -> summarize.
+    // Asker role: peers_list -> recommend_peer -> ask_peers -> summarize.
     if (ROLE === 'asker' && hasAskTools) {
       const step = askerSteps.get(session) ?? 0
       askerSteps.set(session, step + 1)
@@ -176,15 +179,27 @@ const server = createServer((req, res) => {
         return
       }
       if (step === 1) {
+        respondToolCall(
+          res,
+          'recommend_peer',
+          JSON.stringify({ peer: RECOMMEND_PEER, topic: RECOMMEND_TOPIC }),
+          thinking,
+        )
+        return
+      }
+      if (step === 2) {
+        // Keep the asker's process alive briefly so the test can observe its
+        // pending recommendation and run the decision flow mid-task.
+        await new Promise((resolve) => setTimeout(resolve, ASKER_PAUSE_MS))
         respondToolCall(res, 'ask_peers', JSON.stringify({ peers: ASK_PEERS, question }), thinking)
         return
       }
       const toolResults = messages.filter((message) => message.role === 'tool').map((message) => message.content)
       respondText(
         res,
-        `Roster from peers_list:\n${toolResults[0] ?? '(no roster)'}\n\nAnswers from ask_peers:\n${
-          toolResults[1] ?? toolResults[0] ?? '(no answers)'
-        }`,
+        `Roster from peers_list:\n${toolResults[0] ?? '(no roster)'}\n\nRecommendation:\n${
+          toolResults[1] ?? '(no recommendation)'
+        }\n\nAnswers from ask_peers:\n${toolResults[2] ?? toolResults[1] ?? '(no answers)'}`,
         thinking,
       )
       return

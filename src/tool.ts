@@ -1,17 +1,25 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { askPeer, askPeerAsync, pollAsk } from './peer-client.ts'
+import { askPeer, askPeerAsync, pollAsk, requestRecommendation } from './peer-client.ts'
 import type { Config } from './config.ts'
 import type { Identity } from './identity.ts'
 import type { PeerRegistry } from './registry.ts'
+import { verifyFriendCard } from './card.ts'
 
-/** Register the full model-facing tool suite: ask_peer, peers_list, ask_peers. */
-export function registerAskTools(ctx: Context, registry: PeerRegistry, config: Config, identity: Identity): void {
+/** Register the full model-facing tool suite: ask_peer, peers_list, ask_peers, recommend_peer. */
+export function registerAskTools(
+  ctx: Context,
+  registry: PeerRegistry,
+  config: Config,
+  identity: Identity,
+  onRecommend?: (from: string, card: string, reason?: string) => void,
+): void {
   registerAskPeer(ctx, registry, config, identity)
   registerPeersList(ctx, registry)
   registerAskPeers(ctx, registry, config, identity)
   registerAskPeerAsync(ctx, registry, config, identity)
   registerAskResult(ctx, registry)
+  registerRecommendPeer(ctx, registry, config, identity, onRecommend)
 }
 
 function registerAskPeer(ctx: Context, registry: PeerRegistry, config: Config, identity: Identity): void {
@@ -87,6 +95,81 @@ function registerAskPeer(ctx: Context, registry: PeerRegistry, config: Config, i
           args.question,
         )
         return { peer: args.peer, answer: result.answer, truncated: result.truncated }
+      },
+    }),
+  )
+}
+
+function registerRecommendPeer(
+  ctx: Context,
+  registry: PeerRegistry,
+  config: Config,
+  identity: Identity,
+  onRecommend?: (from: string, card: string, reason?: string) => void,
+): void {
+  ctx.tools.register(
+    defineTool({
+      name: 'recommend_peer',
+      description:
+        'Ask a colleague agent to recommend another agent who can help — use it when the user ' +
+        'needs expertise no current friend advertises (a new skill, domain, or person). The ' +
+        'colleague returns a signed friend card; the recommendation is shown to the user for ' +
+        'approval before the new friend is added. Call peers_list first and choose a friend ' +
+        'likely to know the right person.',
+      parameters: {
+        peer: {
+          type: 'string',
+          required: true,
+          description: 'Peer name to ask for the recommendation (from peers_list)',
+        },
+        topic: {
+          type: 'string',
+          description:
+            'Optional topic the recommended agent should know about (their tags/description are matched)',
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            peer: { type: 'string', required: true },
+            from: { type: 'string', required: true },
+            recommended: { type: 'string', required: true },
+            status: { type: 'string', required: true },
+          },
+        },
+        render: (_args, value) => [
+          {
+            type: 'text',
+            text:
+              `${value.from} recommended ${value.recommended}. ` +
+              `The recommendation is waiting for the user's approval; it will be added to friends only if the user accepts.`,
+          },
+        ],
+      },
+      async execute(args, exec) {
+        const peer = registry.resolve(args.peer)
+        if (!peer) {
+          const known = registry.list().map((entry) => entry.peer.name).join(', ')
+          throw new Error(
+            `recommend_peer: unknown peer "${args.peer}" — call peers_list to see available peers. Known: ${known || 'none'}`,
+          )
+        }
+        const { card } = await requestRecommendation(
+          peer,
+          { callerName: config.callerName, identity, signal: exec.signal },
+          args.topic,
+        )
+        const verified = verifyFriendCard(card)
+        if (!verified.ok) throw new Error(`recommend_peer: recommended card is invalid: ${verified.reason}`)
+        onRecommend?.(args.peer, card, args.topic)
+        return {
+          peer: args.peer,
+          from: args.peer,
+          recommended: verified.peer.name,
+          status: 'awaiting_user_approval',
+        }
       },
     }),
   )

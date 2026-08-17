@@ -5,6 +5,9 @@ import {
   ADVERTISE_PATH,
   ASK_PATH,
   PROTOCOL_VERSION,
+  RECOMMEND_PATH,
+  type RecommendRequest,
+  type RecommendSuccess,
   STATUS_PATH,
   type Advert,
   type AskAccepted,
@@ -164,4 +167,62 @@ export async function fetchAdvert(peer: PeerConfig, timeoutMs = 3000): Promise<A
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * Ask a peer to recommend one of its friends (as a signed friend card) that
+ * matches a topic. The returned card is issued by the recommended agent
+ * itself, so it can be verified against the embedded public key.
+ */
+export async function requestRecommendation(
+  peer: PeerConfig,
+  options: AskCallOptions,
+  topic?: string,
+): Promise<{ from: string; card: string }> {
+  const request: RecommendRequest = {
+    protocolVersion: PROTOCOL_VERSION,
+    caller: options.callerName,
+    token: peer.token,
+    ...(topic !== undefined && topic !== '' ? { topic } : {}),
+  }
+  if (options.identity) {
+    const { publicKey: _publicKey, signature: _signature, ...unsigned } = request
+    request.publicKey = options.identity.publicKey
+    request.signature = signPayload(options.identity.privateKey, canonicalJson(unsigned))
+  }
+
+  const url = `http://${peer.host}:${peer.port}${RECOMMEND_PATH}`
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(request),
+      signal: options.signal,
+    })
+  } catch (error) {
+    throw new Error(`recommend_peer: cannot reach ${peer.name} (${url}): ${String(error)}`)
+  }
+  if (!response.ok) {
+    let detail = ''
+    try {
+      const body = (await response.json()) as { error?: { message?: string } }
+      if (body.error !== undefined && typeof body.error.message === 'string') detail = body.error.message
+    } catch {
+      // Non-JSON error body; fall back to the status alone.
+    }
+    throw new Error(
+      `recommend_peer: peer ${peer.name} rejected the request (HTTP ${response.status}${detail !== '' ? `: ${detail}` : ''})`,
+    )
+  }
+  let body: RecommendSuccess
+  try {
+    body = (await response.json()) as RecommendSuccess
+  } catch (error) {
+    throw new Error(`recommend_peer: peer ${peer.name} returned an unparseable response: ${String(error)}`)
+  }
+  if (!body.ok || typeof body.card !== 'string' || typeof body.from !== 'string') {
+    throw new Error(`recommend_peer: peer ${peer.name} returned an invalid recommendation`)
+  }
+  return { from: body.from, card: body.card }
 }

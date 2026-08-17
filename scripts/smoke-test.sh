@@ -15,6 +15,9 @@
 #     through the mock model endpoint;
 #   - the answering agent's sandbox is read-only (a write attempt is denied
 #     and leaves no file);
+#   - friend recommendations work: authenticated /recommend with topic
+#     matching, the model-driven recommend_peer tool call, the pending
+#     notification, and the owner's Add decision merging the new friend;
 #   - the full model-driven loop works: Ada's agent lists peers, asks two of
 #     them with ask_peers, and cross-validates both answers.
 
@@ -68,6 +71,11 @@ ADA_PUB="$(gen_identity ada)"
 BOB_PUB="$(gen_identity bob)"
 CAROL_PUB="$(gen_identity carol)"
 
+# The plugin's settings file overrides the profile patch, so stale files from
+# earlier runs would silently change the friend graph. Start from the profile
+# values every run (keys are kept).
+rm -f "$SMOKE_DIR/keys/settings-ada.json" "$SMOKE_DIR/keys/settings-bob.json" "$SMOKE_DIR/keys/settings-carol.json"
+
 # 1. Create the profiles (base bundle + this plugin).
 for side in ada bob carol; do
   if [ ! -d "$DSH_HOME/profiles/$side" ]; then
@@ -99,7 +107,7 @@ configure_side() {
     allowExecution: false
     description: '$description'
     tags: [$tags]
-    rosterRefreshMs: 60000
+    rosterRefreshMs: 2000
     peers:
       - name: 'bob'
         host: '127.0.0.1'
@@ -168,13 +176,19 @@ EOF
     allowExecution: false
     description: '$description'
     tags: [$tags]
-    rosterRefreshMs: 60000
+    rosterRefreshMs: 2000
     peers:
       - name: 'ada'
         host: '127.0.0.1'
         port: 3877
         token: 'smoke-secret'
         publicKey: '$ADA_PUB'
+        mode: 'auto'
+      - name: 'bob'
+        host: '127.0.0.1'
+        port: 3878
+        token: 'smoke-secret'
+        publicKey: '$BOB_PUB'
         mode: 'auto'
 EOF
       ;;
@@ -370,6 +384,49 @@ curl -sf -X POST http://127.0.0.1:3878/sign/verify \
   exit 1
 }
 
+log "recommend: unknown caller must be rejected"
+code="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3879/recommend \
+  -H 'content-type: application/json' \
+  -d '{"protocolVersion":1,"caller":"mallory","topic":"env-setup"}')"
+[ "$code" = "403" ] || { echo "expected 403 for unknown recommend caller, got $code" >&2; exit 1; }
+
+log "recommend: a wrong token must be rejected"
+code="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3879/recommend \
+  -H 'content-type: application/json' \
+  -d '{"protocolVersion":1,"caller":"ada","token":"wrong","topic":"env-setup"}')"
+[ "$code" = "403" ] || { echo "expected 403 for wrong recommend token, got $code" >&2; exit 1; }
+
+log "recommend: signed request from ada to carol returns bob's card"
+RECOMMEND_JSON="$(node --input-type=module -e "
+  import { loadOrCreateIdentity } from '$ROOT/lib/identity.js'
+  import { requestRecommendation } from '$ROOT/lib/peer-client.js'
+  const identity = loadOrCreateIdentity('$SMOKE_DIR/keys', 'ada')
+  const peer = { name: 'carol', host: '127.0.0.1', port: 3879, publicKey: '$CAROL_PUB' }
+  let result
+  for (let i = 0; i < 20; i++) {
+    try {
+      result = await requestRecommendation(peer, { callerName: 'ada', identity }, 'env-setup')
+      break
+    } catch (error) {
+      if (i === 19) throw error
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+  }
+  console.log(JSON.stringify(result))
+")"
+echo "$RECOMMEND_JSON" | grep -q '"from":"bob"' || { echo "recommend did not pick bob" >&2; exit 1; }
+REC_CARD="$(node -e "const d=JSON.parse(process.argv[1]);process.stdout.write(d.card)" "$RECOMMEND_JSON")"
+case "$REC_CARD" in
+  dsh-ask-peer-card:*) ;;
+  *) echo "recommended card prefix missing" >&2; exit 1 ;;
+esac
+curl -sf -X POST http://127.0.0.1:3878/sign/verify \
+  -H 'content-type: application/json' \
+  -d "{\"card\":\"$REC_CARD\"}" | grep -q '"ok":true' || {
+  echo "recommended card failed verification" >&2
+  exit 1
+}
+
 log "async: an unknown askId must 404"
 code="$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3878/ask/status?askId=nonexistent')"
 [ "$code" = "404" ] || { echo "expected 404 for unknown askId, got $code" >&2; exit 1; }
@@ -442,14 +499,75 @@ node --input-type=module -e "
   }
 "
 
-# 8. Full model-driven loop: Ada lists peers, asks bob+carol, cross-validates.
-log "e2e: ada's headless task (peers_list -> ask_peers -> cross-validated answer)"
-OUT="$(DSH_HOME="$DSH_HOME" \
+# 8. Full model-driven loop: Ada lists peers, asks carol for a recommendation,
+#    asks bob+carol to cross-validate, and summarizes. Ada is a one-shot
+#    headless process, so her ask server (with the pending recommendation) is
+#    only alive while the task runs — the pending/decision checks below run
+#    concurrently with the background task.
+log "e2e: ada's headless task (peers_list -> recommend_peer -> ask_peers -> answers)"
+DSH_HOME="$DSH_HOME" \
   DEEPSEEK_API_KEY=mock-key \
   DEEPSEEK_BASE_URL=http://127.0.0.1:9001/v1 \
-  pnpm exec dsh --profile ada "How do I stand up the dev environment?")"
+  MOCK_RECOMMEND_PEER=carol \
+  MOCK_RECOMMEND_TOPIC=env-setup \
+  pnpm exec dsh --profile ada "How do I stand up the dev environment?" > "$SMOKE_DIR/ada-e2e.out" 2>&1 &
+E2E_PID=$!
+PIDS+=("$E2E_PID")
+
+log "e2e: waiting for ada's ask server (fast poll)"
+ADA_UP=false
+for _ in $(seq 1 100); do
+  R="$(curl -s -m 1 "http://127.0.0.1:3877/health" 2>/dev/null || true)"
+  if echo "$R" | grep -q '"peer": *"ada"'; then
+    ADA_UP=true
+    break
+  fi
+  sleep 0.1
+done
+if [ "$ADA_UP" != true ]; then
+  echo "ada's ask server did not come up; task output:" >&2
+  tail -n 20 "$SMOKE_DIR/ada-e2e.out" >&2
+  exit 1
+fi
+
+# 9. The recommendation Ada's agent surfaced is pending; the owner's decision
+#    merges the recommended peer into the friend list.
+log "recommend: ada's pending list holds carol's recommendation of bob"
+for _ in $(seq 1 40); do
+  PENDING_JSON="$(curl -sf http://127.0.0.1:3877/recommend/pending 2>/dev/null || true)"
+  if echo "$PENDING_JSON" | grep -q '"from":"carol"'; then
+    break
+  fi
+  sleep 0.5
+done
+echo "$PENDING_JSON" | grep -q '"from":"carol"' || { echo "pending recommendation missing from carol" >&2; exit 1; }
+echo "$PENDING_JSON" | grep -q '"name":"bob"' || { echo "pending recommendation missing peer bob" >&2; exit 1; }
+
+log "recommend: an invalid decision token must be rejected"
+code="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:3877/friend/decision \
+  -H 'content-type: application/json' \
+  -d '{"recId":"nope","token":"nope","decision":"add"}')"
+[ "$code" = "403" ] || { echo "expected 403 for invalid friend decision token, got $code" >&2; exit 1; }
+
+log "recommend: the owner's add decision merges the recommended peer"
+REC_ID="$(node -e "const d=JSON.parse(process.argv[1]);process.stdout.write(d[0].recId)" "$PENDING_JSON")"
+REC_TOKEN="$(node -e "const d=JSON.parse(process.argv[1]);process.stdout.write(d[0].decisionToken)" "$PENDING_JSON")"
+curl -sf -X POST http://127.0.0.1:3877/friend/decision \
+  -H 'content-type: application/json' \
+  -d "{\"recId\":\"$REC_ID\",\"token\":\"$REC_TOKEN\",\"decision\":\"add\"}" | grep -q '"ok":true' || {
+  echo "friend decision add failed" >&2
+  exit 1
+}
+curl -sf http://127.0.0.1:3877/recommend/pending | grep -q '\[\]' || {
+  echo "pending list not cleared after decision" >&2
+  exit 1
+}
+
+log "e2e: ada's task output"
+wait "$E2E_PID"
+OUT="$(cat "$SMOKE_DIR/ada-e2e.out")"
 printf '%s\n' "$OUT"
-for needle in 'env-setup' 'make dev' 'docker compose'; do
+for needle in 'env-setup' 'make dev' 'docker compose' 'recommended bob'; do
   if ! grep -q "$needle" <<<"$OUT"; then
     echo "ada's output is missing: $needle" >&2
     exit 1

@@ -8,11 +8,21 @@ import type { AskDecisionData, AskRequestData, AskResultData } from './events.ts
 import { canonicalJson, shortSign, signPayload, verifyPayload, type Identity } from './identity.ts'
 import { buildFriendCard, verifyFriendCard } from './card.ts'
 import {
+  emitRecommendationDecision,
+  listPendingRecommendations,
+  mergePeer,
+  resolveRecommendation,
+} from './recommend.ts'
+import {
   ADVERTISE_PATH,
   ASK_PATH,
   DECISION_PATH,
+  FRIEND_DECISION_PATH,
   HEALTH_PATH,
   IDENTITY_PATH,
+  RECOMMEND_PATH,
+  RECOMMEND_PENDING_PATH,
+  serverBaseUrlFrom,
   SETTINGS_PATH,
   STATUS_PATH,
   SIGN_CARD_PATH,
@@ -22,6 +32,8 @@ import {
   type AskStatus,
   type AskStatusSuccess,
   type PendingAskView,
+  type RecommendRequest,
+  type RecommendSuccess,
   type SessionAdvert,
   errorResponse,
   type AskRequest,
@@ -78,6 +90,8 @@ export interface AskServerHooks {
   getToken: () => string
   /** The current friend list (live registry), for auth + GET /settings. */
   getPeers: () => readonly PeerConfig[]
+  /** A friend's live advertised context (description/tags), for topic matching. */
+  getPeerContext: (name: string) => { description?: string; tags?: string[] } | undefined
   /** The answering agent's sessions, for session-level advertisement. */
   getSessions: () => SessionAdvert[]
   /** Apply and persist a settings update from the browser. */
@@ -148,6 +162,11 @@ async function handleRequest(
     return
   }
 
+  if (req.method === 'GET' && url.pathname === RECOMMEND_PENDING_PATH) {
+    sendJson(res, 200, listPendingRecommendations(config))
+    return
+  }
+
   if (req.method === 'GET' && url.pathname === SETTINGS_PATH) {
     sendJson(res, 200, {
       settings: {
@@ -202,6 +221,16 @@ async function handleRequest(
     return
   }
 
+  if (req.method === 'POST' && url.pathname === RECOMMEND_PATH) {
+    await handleRecommend(req, res, config, hooks)
+    return
+  }
+
+  if (req.method === 'POST' && url.pathname === FRIEND_DECISION_PATH) {
+    await handleFriendDecision(req, res, config, hooks, live)
+    return
+  }
+
   if (req.method === 'POST' && url.pathname === DECISION_PATH) {
     await handleDecision(req, res)
     return
@@ -242,28 +271,12 @@ async function handleRequest(
 
   // The live registry (settings file / Settings page), NOT the static config:
   // friend mode changes must take effect without a restart.
-  const peer = hooks.getPeers().find((item) => item.name === request.caller)
-  if (peer === undefined) {
-    sendJson(res, 403, errorResponse('forbidden', `caller "${request.caller}" is not an allowed peer`))
+  const auth = authenticateCaller(request.caller, request, config, hooks)
+  if (!auth.ok) {
+    sendJson(res, 403, errorResponse('forbidden', auth.error))
     return
   }
-
-  if (peer.publicKey !== undefined) {
-    if (request.publicKey !== peer.publicKey) {
-      sendJson(res, 403, errorResponse('forbidden', 'public key mismatch'))
-      return
-    }
-    const { publicKey: _publicKey, signature, ...unsigned } = request
-    if (signature === undefined || !verifyPayload(peer.publicKey, canonicalJson(unsigned), signature)) {
-      sendJson(res, 403, errorResponse('forbidden', 'invalid signature'))
-      return
-    }
-  } else if (config.requireToken || peer.token !== undefined) {
-    if (!tokenMatches(peer.token ?? '', request.token)) {
-      sendJson(res, 403, errorResponse('forbidden', 'invalid token'))
-      return
-    }
-  }
+  const peer = auth.peer
 
   const mode = peer.mode ?? 'ask'
   if (mode === 'deny') {
@@ -331,6 +344,32 @@ function tokenMatches(expected: string, actual: string | undefined): boolean {
   const b = Buffer.from(expected, 'utf8')
   if (a.length !== b.length) return false
   return timingSafeEqual(a, b)
+}
+
+/**
+ * Authenticate a peer request against the live friend list: allowlist by
+ * caller name, then either the stored friend sign (signature required) or the
+ * shared token. The live registry is used, not the static config, so friend
+ * changes apply without a restart.
+ */
+function authenticateCaller(
+  caller: string,
+  credentials: { token?: string; publicKey?: string; signature?: string },
+  config: Config,
+  hooks: AskServerHooks,
+): { ok: true; peer: PeerConfig } | { ok: false; error: string } {
+  const peer = hooks.getPeers().find((item) => item.name === caller)
+  if (peer === undefined) return { ok: false, error: `caller "${caller}" is not an allowed peer` }
+  if (peer.publicKey !== undefined) {
+    if (credentials.publicKey !== peer.publicKey) return { ok: false, error: 'public key mismatch' }
+    const { publicKey, signature, ...unsigned } = credentials
+    if (signature === undefined || !verifyPayload(peer.publicKey, canonicalJson(unsigned), signature)) {
+      return { ok: false, error: 'invalid signature' }
+    }
+  } else if (config.requireToken || peer.token !== undefined) {
+    if (!tokenMatches(peer.token ?? '', credentials.token)) return { ok: false, error: 'invalid token' }
+  }
+  return { ok: true, peer }
 }
 
 function readBody(req: IncomingMessage, limit: number): Promise<string> {
@@ -606,6 +645,177 @@ async function handleSignVerify(req: IncomingMessage, res: ServerResponse): Prom
   sendJson(res, 200, result)
 }
 
+/**
+ * POST /recommend — a friend asks this side to recommend one of ITS friends
+ * (as a signed friend card) that matches a topic. Authenticated like an ask;
+ * the returned card is fetched from the recommended agent itself, so trust
+ * flows through the card's own signature rather than this side's word.
+ */
+async function handleRecommend(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: Config,
+  hooks: AskServerHooks,
+): Promise<void> {
+  let request: RecommendRequest
+  try {
+    request = JSON.parse(await readBody(req, MAX_BODY_BYTES)) as RecommendRequest
+  } catch {
+    sendJson(res, 400, errorResponse('bad_request', 'request body must be JSON'))
+    return
+  }
+  if (
+    request.protocolVersion !== PROTOCOL_VERSION ||
+    typeof request.caller !== 'string' ||
+    request.caller.trim() === ''
+  ) {
+    sendJson(res, 400, errorResponse('bad_request', 'protocolVersion and caller are required'))
+    return
+  }
+  const auth = authenticateCaller(request.caller, request, config, hooks)
+  if (!auth.ok) {
+    sendJson(res, 403, errorResponse('forbidden', auth.error))
+    return
+  }
+
+  const topic = typeof request.topic === 'string' ? request.topic.trim() : ''
+  const candidates = hooks
+    .getPeers()
+    .filter((item) => item.name !== request.caller)
+    .sort(
+      (a, b) =>
+        scoreFriend(b, topic, hooks.getPeerContext(b.name)) -
+        scoreFriend(a, topic, hooks.getPeerContext(a.name)),
+    )
+  if (topic !== '') {
+    const matching = candidates.filter((item) => scoreFriend(item, topic, hooks.getPeerContext(item.name)) > 0)
+    if (matching.length === 0) {
+      sendJson(
+        res,
+        404,
+        errorResponse('no_recommendation', `no friend matches the topic "${topic}"`),
+      )
+      return
+    }
+  }
+
+  for (const candidate of candidates.slice(0, 3)) {
+    const card = await fetchFriendCard(candidate)
+    if (card === undefined) continue
+    sendJson(res, 200, { ok: true, from: candidate.name, card } satisfies RecommendSuccess)
+    return
+  }
+  sendJson(
+    res,
+    404,
+    errorResponse(
+      'no_recommendation',
+      'no reachable friend to recommend (candidate friends are offline or have no card)',
+    ),
+  )
+}
+
+/**
+ * POST /friend/decision — the owner answers a friend recommendation. On
+ * "add", the card is re-verified and the recommended agent is merged into the
+ * friend list (replacing by name) and persisted via the settings channel.
+ */
+async function handleFriendDecision(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: Config,
+  hooks: AskServerHooks,
+  live: () => LiveAdvert,
+): Promise<void> {
+  let body: { recId?: unknown; token?: unknown; decision?: unknown }
+  try {
+    body = JSON.parse(await readBody(req, MAX_BODY_BYTES)) as typeof body
+  } catch {
+    sendJson(res, 400, errorResponse('bad_request', 'request body must be JSON'))
+    return
+  }
+  if (
+    typeof body.recId !== 'string' ||
+    typeof body.token !== 'string' ||
+    typeof body.decision !== 'string'
+  ) {
+    sendJson(res, 400, errorResponse('bad_request', 'recId, token, and decision are required'))
+    return
+  }
+  const pending = resolveRecommendation(body.recId, body.token)
+  if (pending === undefined) {
+    sendJson(res, 403, errorResponse('forbidden', 'invalid decision token'))
+    return
+  }
+  if (body.decision === 'decline') {
+    emitRecommendationDecision(pending, 'declined')
+    sendJson(res, 200, { ok: true })
+    return
+  }
+  if (body.decision !== 'add') {
+    sendJson(res, 400, errorResponse('bad_request', 'decision must be add or decline'))
+    return
+  }
+  const verified = verifyFriendCard(pending.card)
+  if (!verified.ok) {
+    sendJson(res, 400, errorResponse('bad_request', `recommended card is invalid: ${verified.reason}`))
+    return
+  }
+  const peer: PeerConfig = {
+    name: verified.peer.name,
+    host: verified.peer.host,
+    port: verified.peer.port,
+    publicKey: verified.peer.publicKey,
+    ...(verified.peer.description !== undefined ? { description: verified.peer.description } : {}),
+    mode: 'ask',
+  }
+  hooks.onUpdate({
+    description: live().description,
+    tags: live().tags,
+    peers: mergePeer(hooks.getPeers(), peer),
+    local: localFromConfig(config),
+  })
+  emitRecommendationDecision(pending, 'added')
+  sendJson(res, 200, { ok: true, peer: { name: peer.name, host: peer.host, port: peer.port } })
+}
+
+/** Score how well a friend matches a recommendation topic (tags weigh most). */
+function scoreFriend(
+  peer: PeerConfig,
+  topic: string,
+  context?: { description?: string; tags?: string[] },
+): number {
+  const words = topic.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2)
+  if (words.length === 0) return 0
+  const text = [peer.name, peer.description ?? '', context?.description ?? ''].join(' ').toLowerCase()
+  const tags = context?.tags ?? []
+  let score = 0
+  for (const word of words) {
+    if (tags.some((tag) => tag.toLowerCase().includes(word))) score += 3
+    if (text.includes(word)) score += 1
+  }
+  return score
+}
+
+/** Fetch a friend's current signed card; undefined when unreachable/invalid. */
+async function fetchFriendCard(peer: PeerConfig, timeoutMs = 2500): Promise<string | undefined> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(`http://${peer.host}:${peer.port}${SIGN_CARD_PATH}`, {
+      signal: controller.signal,
+    })
+    if (!response.ok) return undefined
+    const body = (await response.json()) as { card?: unknown }
+    if (typeof body.card !== 'string') return undefined
+    return verifyFriendCard(body.card).ok ? body.card : undefined
+  } catch {
+    return undefined
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** Run an async ask in the background: approval (when required), then answer. */
 async function runAsyncAsk(
   ctx: Context,
@@ -683,9 +893,7 @@ function emitResult(
 
 /** The base URL of this side's inbound ask server, as a browser can reach it. */
 export function serverBaseUrl(config: Config): string {
-  const host =
-    config.listenHost === '0.0.0.0' || config.listenHost === '::' ? '127.0.0.1' : config.listenHost
-  return `http://${host}:${config.listenPort}`
+  return serverBaseUrlFrom(config.listenHost, config.listenPort)
 }
 
 function decisionUrl(config: Config): string {

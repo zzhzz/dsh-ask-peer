@@ -18,6 +18,7 @@ import {
   type StoredSettings,
 } from './settings.ts'
 import { registerAskTools } from './tool.ts'
+import { listPendingRecommendations, registerRecommendation } from './recommend.ts'
 
 const TOPIC_STOPWORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'for', 'with', 'how', 'to', 'in', 'on', 'of',
@@ -106,7 +107,10 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
   }
   applySettings(stored.settings)
 
-  registerAskTools(ctx, registry, runtime, identity)
+  registerAskTools(ctx, registry, runtime, identity, (from, card, reason) => {
+    const result = registerRecommendation(ctx, runtime, from, card, reason)
+    if ('error' in result) ctx.logger.warn(`[ask-peer] recommendation rejected: ${result.error}`)
+  })
   startRosterRefresh(ctx, registry, runtime)
 
   // Live roster guidance: every agent sees its available friends (name,
@@ -137,9 +141,16 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
             return `- ${entry.peer.name}${reachable}${tags}${description ? `: ${description}` : ''}${topic}${sessionHint}`
           })
           return (
-            'Colleague agents you can ask with ask_peer (one) or ask_peers (several), ' +
-            'chosen by their advertised tags/description below (call peers_list for live details):\n' +
-            lines.join('\n')
+            'Colleague agents you can ask with ask_peer (one) or ask_peers (several for ' +
+            'cross-validation), chosen by their advertised tags/description below (call peers_list ' +
+            'for live details):\n' +
+            lines.join('\n') +
+            '\n\nUse them naturally, without the user telling you to: when the user asks how to do ' +
+            'something and a friend advertises matching expertise, or the user mentions a colleague ' +
+            'or their work, call ask_peer directly (ask_peers with 2-3 peers when the answer matters ' +
+            'and you want to cross-validate). Do not ask for trivia you can answer locally, do not ' +
+            'ask about topics no friend advertises, and never re-ask a peer who already answered. ' +
+            'If the user needs expertise no friend has, use recommend_peer to discover a new friend.'
           )
         },
       }),
@@ -151,6 +162,12 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
       const dispose = startAskServer(ctx, runtime, identity, () => live, {
         getToken: () => uiToken,
         getPeers: () => registry.list().map((entry) => entry.peer),
+        getPeerContext: (name: string) => {
+          const entry = registry.list().find((item) => item.peer.name === name)
+          return entry?.advert !== undefined
+            ? { description: entry.advert.description, tags: entry.advert.tags }
+            : undefined
+        },
         getSessions: (): SessionAdvert[] => {
           const sessions = ctx.get('sessions')
           if (sessions === undefined) return []
@@ -228,9 +245,18 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
           res.end(JSON.stringify(listPendingAsks(runtime)))
         },
       })
+      const disposePendingFriends = sctx.webServer.register({
+        kind: 'prefix',
+        path: '/ask-peer/pending-friends',
+        handler: (_req, res) => {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify(listPendingRecommendations(runtime)))
+        },
+      })
       return () => {
         disposeConfig()
         disposePending()
+        disposePendingFriends()
       }
     })
   })

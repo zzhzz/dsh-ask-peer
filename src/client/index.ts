@@ -13,6 +13,7 @@ import type {} from '../events.ts'
 import { AskNodeView } from './AskNode.tsx'
 import { AskNotify } from './AskNotify.tsx'
 import { AskPeerSettingsSection } from './AskPeerSettings.tsx'
+import { FriendRecommendNodeView } from './FriendRecommendNode.tsx'
 
 /** The view-model published for one ask node. */
 export interface AskChatData {
@@ -27,9 +28,28 @@ export interface AskChatData {
   readonly decisionToken?: string
 }
 
+/** The view-model published for one friend recommendation node. */
+export interface FriendRecommendChatData {
+  readonly recId: string
+  readonly status: 'pending' | 'added' | 'declined'
+  readonly from: string
+  readonly peer: {
+    readonly name: string
+    readonly host: string
+    readonly port: number
+    readonly publicKey: string
+    readonly description?: string
+    readonly tags?: string[]
+  }
+  readonly reason?: string
+  readonly decisionUrl?: string
+  readonly decisionToken?: string
+}
+
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ChatNodeDataMap {
     'ask': AskChatData
+    'friend-recommend': FriendRecommendChatData
   }
 }
 
@@ -90,13 +110,63 @@ const askDefinition: ConversationNodeDefinition<AskChatData> = {
   },
 }
 
+const friendRecommendDefinition: ConversationNodeDefinition<FriendRecommendChatData> = {
+  kind: 'friend-recommend',
+  target: 'chat',
+  match: (event) => {
+    if (event.type === 'friend/recommend') return { id: event.data.recId, role: 'start' }
+    if (event.type === 'friend/decision') return { id: event.data.recId, role: 'update' }
+    return null
+  },
+  start: (_context, match) => {
+    if (match.event.type !== 'friend/recommend') throw new Error('friend-recommend node requires friend/recommend')
+    return {
+      recId: match.event.data.recId,
+      status: 'pending',
+      from: match.event.data.from,
+      peer: match.event.data.peer,
+      reason: match.event.data.reason,
+      decisionUrl: match.event.data.decisionUrl,
+      decisionToken: match.event.data.decisionToken,
+    }
+  },
+  update: (context, match) => {
+    if (match.event.type === 'friend/decision') {
+      return { ...context.state, status: match.event.data.decision === 'added' ? 'added' : 'declined' }
+    }
+    return context.state
+  },
+  publication: () => 'immediate',
+  buildLocationData: () => null,
+  buildViewNode: (context) => {
+    if (context.state === undefined) return null
+    return {
+      key: context.key,
+      kind: 'friend-recommend',
+      id: context.id,
+      target: 'chat',
+      anchorSeq: context.start?.event.seq ?? context.matches[0]?.event.seq ?? 0,
+      location: locationOf(context),
+      visibility: 'visible',
+      data: context.state,
+    }
+  },
+}
+
 export const inject = ['conversationEvents', 'slots']
 
 /** Browser half: register the ask conversation node and its chat renderer. */
 export function apply(ctx: ClientContext): void {
   ctx.conversationEvents.register(askDefinition)
+  ctx.conversationEvents.register(friendRecommendDefinition)
   ctx.slots.inject('conversation.chat.node', () =>
     ctx.slots.register({ name: 'conversation.chat.node', key: 'ask', locale: 'conversation' }, AskNodeView),
+  )
+  ctx.slots.inject('conversation.chat.node', () =>
+    ctx.slots.register(
+      { name: 'conversation.chat.node', key: 'friend-recommend', locale: 'conversation' },
+      FriendRecommendNodeView,
+    ),
   )
   ctx.slots.inject('settings.section', () =>
     ctx.slots.register(

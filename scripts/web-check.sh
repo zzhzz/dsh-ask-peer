@@ -76,4 +76,10 @@ curl -sf http://127.0.0.1:3080/ask-peer/config | grep -q 'serverUrl' || {
   exit 1
 }
 
+log "pending-friends route is served"
+curl -sf http://127.0.0.1:3080/ask-peer/pending-friends | grep -q '\[\]' || {
+  echo "pending-friends route did not return an empty list" >&2
+  exit 1
+}
+
 log "web check passed: browser half discovered and served"

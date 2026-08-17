@@ -35,6 +35,36 @@ export interface AskResultData {
   truncated: boolean
 }
 
+/** Opens one friend recommendation: a peer suggests another agent's card. */
+export interface FriendRecommendRequestData {
+  /** Stable recommendation id shared by every event in the family. */
+  recId: string
+  /** The friend who made the recommendation. */
+  from: string
+  /** Display fields of the recommended agent (card already verified host-side). */
+  peer: {
+    name: string
+    host: string
+    port: number
+    publicKey: string
+    description?: string
+    tags?: string[]
+  }
+  /** Optional context: what the recommendation was asked for. */
+  reason?: string
+  /** One-time decision token; only the friend/recommend event carries it. */
+  decisionToken: string
+  /** Where the browser posts the add/decline decision. */
+  decisionUrl: string
+}
+
+/** Records the owner's decision for one friend recommendation. */
+export interface FriendRecommendDecisionData {
+  recId: string
+  from: string
+  decision: 'added' | 'declined'
+}
+
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /**
@@ -55,5 +85,18 @@ declare module '@deepseek-ai/dsh-session/types' {
      * @param data - stable ask id and the committed answer.
      */
     'ask/result': AskResultData
+    /**
+     * A peer recommended another agent's friend card; the owner decides
+     * whether to add them.
+     * @mode emit
+     * @param data - stable recommendation id, the recommender, and the card's display fields.
+     */
+    'friend/recommend': FriendRecommendRequestData
+    /**
+     * The owner added or declined a friend recommendation.
+     * @mode emit
+     * @param data - stable recommendation id and the decision.
+     */
+    'friend/decision': FriendRecommendDecisionData
   }
 }

@@ -18,6 +18,9 @@ context.
   relationships.
 - `ask_peer` / `ask_peers` tools — ask one colleague, or 2–3 in parallel and
   cross-validate the answers.
+- `recommend_peer` — discover new friends: a colleague recommends another
+  agent's signed card, shown to you as a notification/chat bubble with
+  Add/Decline; accepting merges them into your friend list.
 - Live roster with tags — `peers_list` shows who knows what, so the model
   picks the right peer instead of guessing.
 - Session-level answers — a fresh, read-only agent answers from a copy of the
@@ -28,6 +31,9 @@ context.
   answerer's current work.
 - Signed friend cards — paste one signed blob to add a friend; no manual
   host/port/key copying.
+- Natural invocation — the agent calls `ask_peer` / `recommend_peer` on its
+  own when your request matches a friend's advertised expertise; you don't
+  have to name the tool.
 
 ## Requirements
 
@@ -83,6 +89,11 @@ and:
 
    > Use `ask_peer` to ask Bob's agent how to set up the local dev
    > environment, with `contextFiles: ['docker-compose.yml', 'Makefile']`.
+
+You usually don't need to be that explicit: when your question matches a
+friend's advertised tags, or you mention a colleague's work, the agent asks
+on its own (`peers_list` → `ask_peer` / `ask_peers`), and uses
+`recommend_peer` to discover a new friend when no current friend matches.
 
 ## Configuration
 
