@@ -165,7 +165,14 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
         getPeerContext: (name: string) => {
           const entry = registry.list().find((item) => item.peer.name === name)
           return entry?.advert !== undefined
-            ? { description: entry.advert.description, tags: entry.advert.tags }
+            ? {
+                description: entry.advert.description,
+                tags: entry.advert.tags,
+                topics: entry.advert.sessions.flatMap((session) => [
+                  ...(session.topics ?? []),
+                  ...(session.topic !== undefined && session.topic !== '' ? [session.topic] : []),
+                ]),
+              }
             : undefined
         },
         getSessions: (): SessionAdvert[] => {

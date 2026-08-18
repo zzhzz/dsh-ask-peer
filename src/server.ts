@@ -91,7 +91,9 @@ export interface AskServerHooks {
   /** The current friend list (live registry), for auth + GET /settings. */
   getPeers: () => readonly PeerConfig[]
   /** A friend's live advertised context (description/tags), for topic matching. */
-  getPeerContext: (name: string) => { description?: string; tags?: string[] } | undefined
+  getPeerContext: (
+    name: string,
+  ) => { description?: string; tags?: string[]; topics?: string[] } | undefined
   /** The answering agent's sessions, for session-level advertisement. */
   getSessions: () => SessionAdvert[]
   /** Apply and persist a settings update from the browser. */
@@ -783,15 +785,17 @@ async function handleFriendDecision(
 function scoreFriend(
   peer: PeerConfig,
   topic: string,
-  context?: { description?: string; tags?: string[] },
+  context?: { description?: string; tags?: string[]; topics?: string[] },
 ): number {
   const words = topic.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2)
   if (words.length === 0) return 0
   const text = [peer.name, peer.description ?? '', context?.description ?? ''].join(' ').toLowerCase()
   const tags = context?.tags ?? []
+  const topics = context?.topics ?? []
   let score = 0
   for (const word of words) {
     if (tags.some((tag) => tag.toLowerCase().includes(word))) score += 3
+    if (topics.some((item) => item.toLowerCase().includes(word))) score += 3
     if (text.includes(word)) score += 1
   }
   return score

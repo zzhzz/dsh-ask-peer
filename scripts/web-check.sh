@@ -15,6 +15,15 @@ PIDS=()
 
 log() { printf '\n== %s ==\n' "$*"; }
 
+# Preflight: the web UI port must be free (a running dsh instance would
+# collide and make the check fail confusingly).
+log "preflight: port 3080 must be free"
+if lsof -iTCP:3080 -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
+  echo "port 3080 is already in use — stop the other dsh instance first" >&2
+  echo "  kill \$(lsof -tiTCP:3080 -sTCP:LISTEN)" >&2
+  exit 1
+fi
+
 cleanup() {
   for pid in "${PIDS[@]:-}"; do
     kill "$pid" 2>/dev/null || true

@@ -30,6 +30,18 @@ PIDS=()
 
 log() { printf '\n== %s ==\n' "$*"; }
 
+# Preflight: every port the smoke test uses must be free, or a leftover dsh
+# instance (e.g. a real browser test you forgot to stop) will make the run
+# fail in confusing ways.
+log "preflight: test ports must be free"
+for port in 3080 3877 3878 3879 9001 9002 9003; do
+  if lsof -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
+    echo "port $port is already in use — stop the other dsh instance first" >&2
+    echo "  kill \$(lsof -tiTCP:$port -sTCP:LISTEN)" >&2
+    exit 1
+  fi
+done
+
 cleanup() {
   printf '%s\n' "${PIDS[@]:-}" > "$SMOKE_DIR/live.pids"
   if [ "${KEEP_RUNNING:-0}" = "1" ]; then
@@ -514,15 +526,21 @@ DSH_HOME="$DSH_HOME" \
 E2E_PID=$!
 PIDS+=("$E2E_PID")
 
-log "e2e: waiting for ada's ask server (fast poll)"
+log "e2e: waiting for ada's ask server + pending recommendation"
 ADA_UP=false
-for _ in $(seq 1 100); do
-  R="$(curl -s -m 1 "http://127.0.0.1:3877/health" 2>/dev/null || true)"
-  if echo "$R" | grep -q '"peer": *"ada"'; then
-    ADA_UP=true
+PENDING_JSON=""
+for _ in $(seq 1 80); do
+  if [ "$ADA_UP" != true ]; then
+    R="$(curl -s -m 1 "http://127.0.0.1:3877/health" 2>/dev/null || true)"
+    if echo "$R" | grep -q '"peer": *"ada"'; then
+      ADA_UP=true
+    fi
+  fi
+  PENDING_JSON="$(curl -sf http://127.0.0.1:3877/recommend/pending 2>/dev/null || true)"
+  if echo "$PENDING_JSON" | grep -q '"from":"carol"'; then
     break
   fi
-  sleep 0.1
+  sleep 0.5
 done
 if [ "$ADA_UP" != true ]; then
   echo "ada's ask server did not come up; task output:" >&2
@@ -533,13 +551,6 @@ fi
 # 9. The recommendation Ada's agent surfaced is pending; the owner's decision
 #    merges the recommended peer into the friend list.
 log "recommend: ada's pending list holds carol's recommendation of bob"
-for _ in $(seq 1 40); do
-  PENDING_JSON="$(curl -sf http://127.0.0.1:3877/recommend/pending 2>/dev/null || true)"
-  if echo "$PENDING_JSON" | grep -q '"from":"carol"'; then
-    break
-  fi
-  sleep 0.5
-done
 echo "$PENDING_JSON" | grep -q '"from":"carol"' || { echo "pending recommendation missing from carol" >&2; exit 1; }
 echo "$PENDING_JSON" | grep -q '"name":"bob"' || { echo "pending recommendation missing peer bob" >&2; exit 1; }
 

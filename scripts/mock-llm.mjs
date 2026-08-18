@@ -26,7 +26,7 @@ const ANSWER =
 const ASK_PEERS = (process.env.MOCK_ASK_PEERS ?? 'bob,carol').split(',').map((s) => s.trim())
 const RECOMMEND_PEER = process.env.MOCK_RECOMMEND_PEER ?? 'carol'
 const RECOMMEND_TOPIC = process.env.MOCK_RECOMMEND_TOPIC ?? 'dev environment'
-const ASKER_PAUSE_MS = Number(process.env.MOCK_ASKER_PAUSE_MS ?? 4000)
+const ASKER_PAUSE_MS = Number(process.env.MOCK_ASKER_PAUSE_MS ?? 6000)
 const DEFAULT_QUESTION = process.env.MOCK_ASK_QUESTION ?? 'How do I stand up the dev environment?'
 const ATTEMPT_WRITE = process.env.MOCK_ATTEMPT_WRITE === '1'
 const ASK_LOOP = process.env.MOCK_ASK_LOOP === '1'
