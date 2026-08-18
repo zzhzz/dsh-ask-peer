@@ -132,6 +132,14 @@ pnpm smoke         # keyless 3-instance smoke test
 pnpm web-check     # verifies the web bundle is discovered and served
 ```
 
+With a real DeepSeek key, the browser-level test scripts boot three instances
+(Ada/Bob/Carol) and leave them running for manual checks:
+
+```sh
+bash scripts/real-choice-test.sh     # advertisement quality + peer choice
+bash scripts/real-recommend-test.sh  # friend recommendation flow (add via card)
+```
+
 ## Publishing
 
 When pushing to GitHub, add the **`dsh-plugin`** topic to the repository for
