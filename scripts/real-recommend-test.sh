@@ -124,7 +124,7 @@ write_patch carol-web carol 3879 "$REAL/carol-proj"
 
 # Authoritative friend graph + ada's advertisement metadata. mallory is a
 # non-matching/unreachable decoy so the probe proves topic-based selection.
-node -e '
+KEYS="$KEYS" node -e '
   const fs = require("node:fs")
   const KEYS = process.env.KEYS
   const adaPub = fs.readFileSync(KEYS + "/ada.pub", "utf8").trim()
@@ -155,7 +155,7 @@ node -e '
       { name: "mallory", host: "127.0.0.1", port: 1, mode: "ask" },
     ],
   })
-' KEYS="$KEYS"
+'
 
 log "starting ada, bob, carol (web)"
 DSH_HOME="$DSH_HOME" dsh web > "$REAL/ada.log" 2>&1 &

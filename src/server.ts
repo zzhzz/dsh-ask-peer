@@ -700,23 +700,20 @@ async function handleRecommend(
   )
   scored.sort((a, b) => b.score - a.score)
 
-  if (topic !== '') {
-    const matching = scored.filter((entry) => entry.score > 0)
-    if (matching.length === 0) {
-      const known = candidates.map((item) => item.name).join(', ') || 'none'
-      sendJson(
-        res,
-        404,
-        errorResponse(
-          'no_recommendation',
-          `no friend matches the topic "${topic}" (known friends: ${known})`,
-        ),
-      )
-      return
-    }
+  // Prefer friends whose live advertisement matches the topic; when nothing
+  // matches (or no topic was given), fall back to the best-known friends so a
+  // referral is still produced instead of a dead end.
+  const ordered =
+    topic !== '' && scored.some((entry) => entry.score > 0)
+      ? scored.filter((entry) => entry.score > 0)
+      : scored
+
+  if (ordered.length === 0) {
+    sendJson(res, 404, errorResponse('no_recommendation', 'you have no friends to recommend'))
+    return
   }
 
-  for (const { peer } of scored.slice(0, 3)) {
+  for (const { peer } of ordered.slice(0, 3)) {
     const card = await fetchFriendCard(peer)
     if (card === undefined) continue
     sendJson(res, 200, { ok: true, from: peer.name, card } satisfies RecommendSuccess)

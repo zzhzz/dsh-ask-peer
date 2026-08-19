@@ -31,6 +31,25 @@ const TOPIC_STOPWORDS = new Set([
   'verbatim', 'pick', 'best', 'matches', 'call', 'return', 'question',
 ])
 
+/**
+ * Guard against corrupted workspace values (e.g. a literal
+ * 'undefined/carol-proj' written by a misconfigured test script): such a
+ * path would make every answering session fail to create. Fall back to the
+ * process cwd, which is always valid.
+ */
+function normalizeWorkspace(workspace: string): string {
+  if (
+    workspace === '' ||
+    workspace === 'undefined' ||
+    workspace.startsWith('undefined/') ||
+    workspace.includes('/undefined/') ||
+    workspace.endsWith('/undefined')
+  ) {
+    return process.cwd()
+  }
+  return workspace
+}
+
 interface SessionTextPart {
   text: string
   source: 'user' | 'assistant'
@@ -91,6 +110,7 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
   // Effective runtime config: profile patch is the bootstrap, the settings
   // file (editable from the settings page) wins for every UI-owned knob.
   const runtime: AskPeerConfig = { ...config, ...stored.settings.local }
+  runtime.workspace = normalizeWorkspace(runtime.workspace)
   const registry = new PeerRegistry(stored.settings.peers)
   const identity = loadOrCreateIdentity(config.keyDir, config.callerName)
   const live: LiveAdvert = {

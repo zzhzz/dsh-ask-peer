@@ -452,6 +452,23 @@ curl -sf -X POST http://127.0.0.1:3878/sign/verify \
   exit 1
 }
 
+log "recommend: a non-matching topic falls back to the best-known friend"
+GENERAL_JSON="$(node --input-type=module -e "
+  import { loadOrCreateIdentity } from '$ROOT/lib/identity.js'
+  import { requestRecommendation } from '$ROOT/lib/peer-client.js'
+  const identity = loadOrCreateIdentity('$SMOKE_DIR/keys', 'ada')
+  const result = await requestRecommendation(
+    { name: 'carol', host: '127.0.0.1', port: 3879, publicKey: '$CAROL_PUB' },
+    { callerName: 'ada', identity },
+    'general',
+  )
+  console.log(JSON.stringify(result))
+")"
+echo "$GENERAL_JSON" | grep -q '"from":"bob"' || {
+  echo "fallback did not recommend bob for a non-matching topic" >&2
+  exit 1
+}
+
 log "async: an unknown askId must 404"
 code="$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:3878/ask/status?askId=nonexistent')"
 [ "$code" = "404" ] || { echo "expected 404 for unknown askId, got $code" >&2; exit 1; }

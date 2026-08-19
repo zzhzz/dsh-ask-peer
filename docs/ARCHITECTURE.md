@@ -118,7 +118,11 @@ Errors use `{ "ok": false, "error": { "code", "message" } }` with 400/403/500.
   sessions, `updatedAt`)
 - `POST /recommend` → `{ "protocolVersion", "caller", token/sign, "topic"? }`;
   authenticated like an ask; returns `{ "ok": true, "from", "card" }` with the
-  best-matching friend's signed card (404 when nothing matches)
+  best-matching friend's signed card. Matching scores each friend's LIVE
+  advertisement (tags, description, session topics, signature-verified) with a
+  fallback to the cached roster context; when no topic is given or nothing
+  matches, it falls back to the best-known friend so a referral is still
+  produced
 - `GET /recommend/pending` → the recommendations waiting for the owner's
   decision (recId, from, card display fields, decision channel)
 - `POST /friend/decision` → `{ "recId", "token", "decision": "add"|"decline" }`;

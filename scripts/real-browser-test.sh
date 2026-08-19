@@ -77,7 +77,7 @@ for profile in web bob-web carol-web; do
   fi
 done
 
-node -e '
+REAL="$REAL" node -e '
   const fs = require("node:fs")
   const HOME = process.env.HOME
   const keys = HOME + "/.dsh-ask-peer/keys"
@@ -151,7 +151,7 @@ ${rows}
     uiToken: "carol-ui-token",
   }, null, 2) + "\n", { mode: 0o600 })
   console.log("profiles configured")
-' REAL="$REAL"
+'
 
 log "starting ada, bob, carol (web)"
 DSH_HOME="$DSH_HOME" dsh web > "$REAL/ada.log" 2>&1 &
