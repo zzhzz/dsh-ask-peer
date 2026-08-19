@@ -4,38 +4,37 @@ A **decentralized** "ask a colleague's agent" plugin for
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh).
 
 The core design is peer-to-peer: **no broker, no shared database, no company
-server**. Every agent runs its own endpoint and keeps its own copy of the
-relationships, so asking happens directly between two agents over the LAN.
-Unlike central-server integrations (e.g. a Feishu/Slack bot), there is
-nothing in the middle to operate or trust — one agent just asks another and
-gets a committed answer from the colleague's own workspace and session
-context.
+server**. Every agent runs its own endpoint and keeps its own copy of its
+relationships, so the network has no single point of control — asking happens
+directly between two agents over the LAN. One agent asks another, and gets a
+committed answer grounded in the colleague's own workspace and session
+context. The result is a community of agents that discover each other, vouch
+for each other, and share expertise — with every relationship owned by the
+two agents in it.
 
 ## A conversation between agents
 
-Bob is fighting a docker-compose dev environment. Instead of posting "how do
-I…" questions into a shared channel and hoping someone answers, he types to
-his own agent:
+Bob is standing up a docker-compose dev environment and wishes a colleague
+had already figured this out. He types to his own agent:
 
 > Carol, recommend another agent who can help me stand up a docker-compose
 > dev environment.
 
-Bob's agent doesn't broadcast to a server — it talks to Carol's agent
-directly, over the LAN, engineer to engineer. Carol checks the agents she
-knows: Ada's agent is advertising exactly this — `docker`, `env-setup`, a
-live session about compose setup. Carol sends Bob Ada's **signed friend
-card**, and Bob's UI shows a small bubble: *Carol recommends ada* with
-**Add friend**. One click, and Bob's agent can ask Ada's agent directly —
-getting an answer grounded in Ada's real workspace and session context.
+Carol's agent considers the agents she knows — none of them advertise docker
+expertise. So she asks around, the way you'd ask around the office: she
+forwards the request to her friend Erin, who checks her own circle and finds
+Ada — live in a docker-compose session right now, advertising `docker` and
+`env-setup`. Ada's **signed friend card** travels back along the chain, and
+lands in Bob's chat as a small bubble: *ada recommended via carol → erin*,
+with **Add friend**. One click, and Bob's agent can ask Ada's agent directly
+— getting an answer grounded in Ada's real workspace and session context.
 
-No broker, no shared database, no central chat platform: three agents, one
-question, a referral, and a new working relationship — all peer to peer.
-
-When Carol knows nobody matching, she asks her own friends onward — but the
-search stays **bounded**: a hop limit (default 1, capped at 3) and a small
-per-hop fan-out keep a "who knows X?" from fanning out into an asking storm.
-The chain travels with the request, so loops are impossible and the UI shows
-where a referral came from — *recommended via carol → ada*.
+Three agents, one question, a referral that travelled two hops, and a new
+working relationship — all peer to peer. The search stays **bounded** by
+design: a hop limit and a small per-hop fan-out keep a "who knows X?" from
+growing into an asking storm, the chain travels with the request so it can
+never loop, and every card is signed — you always know who vouched, and you
+verify the agent before you trust it.
 
 ## Features
 
@@ -47,10 +46,11 @@ where a referral came from — *recommended via carol → ada*.
 - `recommend_peer` — discover new friends: a colleague recommends another
   agent's signed card, shown to you as a notification/chat bubble with
   Add/Decline; accepting merges them into your friend list. When the colleague
-  knows nobody matching, it forwards the request to its own friends — bounded
-  by a hop limit so discovery never becomes an asking storm.
+  knows nobody matching, she asks her own friends onward — bounded by a hop
+  limit (default 1) and a small fan-out so discovery never becomes an asking
+  storm, with the referral path shown right in the bubble (*via carol → erin*).
 - Live roster with tags — `peers_list` shows who knows what, so the model
-  picks the right peer instead of guessing.
+  picks the right peer deliberately.
 - Session-level answers — a fresh, read-only agent answers from a copy of the
   targeted session's context; your live sessions are never touched.
 - Approval bubbles in the Web UI — answer or decline, or trust a friend with
