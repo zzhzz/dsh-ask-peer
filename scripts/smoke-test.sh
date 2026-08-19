@@ -18,6 +18,8 @@
 #   - friend recommendations work: authenticated /recommend with topic
 #     matching, the model-driven recommend_peer tool call, the pending
 #     notification, and the owner's Add decision merging the new friend;
+#   - bounded transitive discovery works: a recommendation is forwarded one
+#     hop (ada -> carol -> bob -> erin) with loop prevention and a via chain;
 #   - the full model-driven loop works: Ada's agent lists peers, asks two of
 #     them with ask_peers, and cross-validates both answers.
 
@@ -34,7 +36,7 @@ log() { printf '\n== %s ==\n' "$*"; }
 # instance (e.g. a real browser test you forgot to stop) will make the run
 # fail in confusing ways.
 log "preflight: test ports must be free"
-for port in 3080 3877 3878 3879 9001 9002 9003; do
+for port in 3080 3877 3878 3879 3890 9001 9002 9003 9004; do
   if lsof -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
     echo "port $port is already in use — stop the other dsh instance first" >&2
     echo "  kill \$(lsof -tiTCP:$port -sTCP:LISTEN)" >&2
@@ -53,7 +55,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$SMOKE_DIR/workspaces/ada" "$SMOKE_DIR/workspaces/bob" "$SMOKE_DIR/workspaces/carol" "$SMOKE_DIR/keys"
+mkdir -p "$SMOKE_DIR/workspaces/ada" "$SMOKE_DIR/workspaces/bob" "$SMOKE_DIR/workspaces/carol" "$SMOKE_DIR/workspaces/erin" "$SMOKE_DIR/keys"
 
 # Generate (or reuse) each agent's signing identity; the public sign is what
 # friends configure as the trust root.
@@ -82,11 +84,12 @@ gen_identity() {
 ADA_PUB="$(gen_identity ada)"
 BOB_PUB="$(gen_identity bob)"
 CAROL_PUB="$(gen_identity carol)"
+ERIN_PUB="$(gen_identity erin)"
 
 # The plugin's settings file overrides the profile patch, so stale files from
 # earlier runs would silently change the friend graph. Start from the profile
 # values every run (keys are kept).
-rm -f "$SMOKE_DIR/keys/settings-ada.json" "$SMOKE_DIR/keys/settings-bob.json" "$SMOKE_DIR/keys/settings-carol.json"
+rm -f "$SMOKE_DIR/keys/settings-ada.json" "$SMOKE_DIR/keys/settings-bob.json" "$SMOKE_DIR/keys/settings-carol.json" "$SMOKE_DIR/keys/settings-erin.json"
 
 # 1. Create (or repair) the profiles: the bundle must be listed in the
 #    profile manifest, or the ask-peer row has no plugin to resolve.
@@ -103,7 +106,7 @@ ensure_profile() {
   rm -rf "$DSH_HOME/profiles/$side"
   (cd "$ROOT" && DSH_HOME="$DSH_HOME" pnpm exec dsh plugin --profile "$side" add .)
 }
-for side in ada bob carol; do
+for side in ada bob carol erin; do
   ensure_profile "$side"
 done
 
@@ -171,6 +174,12 @@ EOF
         token: 'smoke-secret'
         publicKey: '$ADA_PUB'
         mode: 'auto'
+      - name: 'carol'
+        host: '127.0.0.1'
+        port: 3879
+        token: 'smoke-secret'
+        publicKey: '$CAROL_PUB'
+        mode: 'auto'
       - name: 'mallory'
         host: '127.0.0.1'
         port: 1
@@ -181,6 +190,12 @@ EOF
         port: 1
         token: 'smoke-secret'
         mode: 'ask'
+      - name: 'erin'
+        host: '127.0.0.1'
+        port: 3890
+        token: 'smoke-secret'
+        publicKey: '$ERIN_PUB'
+        mode: 'auto'
 EOF
       ;;
     carol)
@@ -215,6 +230,32 @@ EOF
         mode: 'auto'
 EOF
       ;;
+    erin)
+      cat > "$profile/cordis.patch.yml" <<EOF
+- id: ask-peer
+  config:
+    callerName: 'erin'
+    keyDir: '$SMOKE_DIR/keys'
+    listen: true
+    listenHost: '127.0.0.1'
+    listenPort: $port
+    requireToken: true
+    workspace: '$workspace'
+    timeoutMs: 120000
+    maxAnswerChars: 48000
+    allowExecution: false
+    description: '$description'
+    tags: [$tags]
+    rosterRefreshMs: 2000
+    peers:
+      - name: 'bob'
+        host: '127.0.0.1'
+        port: 3878
+        token: 'smoke-secret'
+        publicKey: '$BOB_PUB'
+        mode: 'auto'
+EOF
+      ;;
   esac
 
   if [ "$headless" = "yes" ]; then
@@ -236,6 +277,7 @@ EOF
 configure_side ada 3877 "$SMOKE_DIR/workspaces/ada" 'Ada: asks around before acting' '' yes
 configure_side bob 3878 "$SMOKE_DIR/workspaces/bob" 'Bob: environment setup expert' "'env-setup', 'docker'" no
 configure_side carol 3879 "$SMOKE_DIR/workspaces/carol" 'Carol: testing and CI expert' "'testing', 'ci'" no
+configure_side erin 3890 "$SMOKE_DIR/workspaces/erin" 'Erin: kubernetes expert' "'kubernetes', 'k8s'" no
 
 # 3. Start the mock model endpoints.
 log "starting mock model endpoints"
@@ -247,11 +289,15 @@ MOCK_ROLE=answerer MOCK_PORT=9003 \
   MOCK_ANSWER='Answer: run `docker compose up -d` to stand up the environment.' \
   node "$ROOT/scripts/mock-llm.mjs" &
 PIDS+=($!)
+MOCK_ROLE=answerer MOCK_PORT=9004 \
+  MOCK_ANSWER='Answer: apply the k8s manifest with kubectl apply -f.' \
+  node "$ROOT/scripts/mock-llm.mjs" &
+PIDS+=($!)
 MOCK_ROLE=asker MOCK_PORT=9001 MOCK_ASK_PEERS='bob,carol' node "$ROOT/scripts/mock-llm.mjs" &
 PIDS+=($!)
 
-# 4. Boot Bob's and Carol's dsh daemons (they host answering agents).
-log "booting bob's and carol's dsh daemons"
+# 4. Boot the dsh daemons (they host answering agents).
+log "booting bob, carol, and erin dsh daemons"
 DSH_HOME="$DSH_HOME" \
   DEEPSEEK_API_KEY=mock-key \
   DEEPSEEK_BASE_URL=http://127.0.0.1:9002/v1 \
@@ -261,6 +307,11 @@ DSH_HOME="$DSH_HOME" \
   DEEPSEEK_API_KEY=mock-key \
   DEEPSEEK_BASE_URL=http://127.0.0.1:9003/v1 \
   pnpm exec dsh --profile carol > "$SMOKE_DIR/carol.log" 2>&1 &
+PIDS+=($!)
+DSH_HOME="$DSH_HOME" \
+  DEEPSEEK_API_KEY=mock-key \
+  DEEPSEEK_BASE_URL=http://127.0.0.1:9004/v1 \
+  pnpm exec dsh --profile erin > "$SMOKE_DIR/erin.log" 2>&1 &
 PIDS+=($!)
 
 wait_for_peer() {
@@ -281,11 +332,13 @@ wait_for_peer() {
 }
 wait_for_peer 3878 bob "$SMOKE_DIR/bob.log"
 wait_for_peer 3879 carol "$SMOKE_DIR/carol.log"
+wait_for_peer 3890 erin "$SMOKE_DIR/erin.log"
 
 # 5. Advertisements carry the expected tags.
 log "advert: peers advertise their tags"
 curl -sf http://127.0.0.1:3878/advertise | grep -q 'env-setup' || { echo "bob advert missing tags" >&2; exit 1; }
 curl -sf http://127.0.0.1:3879/advertise | grep -q 'testing' || { echo "carol advert missing tags" >&2; exit 1; }
+curl -sf http://127.0.0.1:3890/advertise | grep -q 'kubernetes' || { echo "erin advert missing tags" >&2; exit 1; }
 
 # 6. Authorization checks against Bob's server.
 log "authz: unknown caller must be rejected"
@@ -466,6 +519,31 @@ GENERAL_JSON="$(node --input-type=module -e "
 ")"
 echo "$GENERAL_JSON" | grep -q '"from":"bob"' || {
   echo "fallback did not recommend bob for a non-matching topic" >&2
+  exit 1
+}
+
+log "recommend: transitive discovery (ada -> carol -> bob -> erin)"
+TRANS_JSON="$(node --input-type=module -e "
+  import { loadOrCreateIdentity } from '$ROOT/lib/identity.js'
+  import { requestRecommendation } from '$ROOT/lib/peer-client.js'
+  import { verifyFriendCard } from '$ROOT/lib/card.js'
+  const identity = loadOrCreateIdentity('$SMOKE_DIR/keys', 'ada')
+  const result = await requestRecommendation(
+    { name: 'carol', host: '127.0.0.1', port: 3879, publicKey: '$CAROL_PUB' },
+    { callerName: 'ada', identity, maxHops: 1 },
+    'kubernetes',
+  )
+  const v = verifyFriendCard(result.card)
+  if (!v.ok) throw new Error('transitive card invalid: ' + v.reason)
+  console.log(JSON.stringify({ from: result.from, via: result.via ?? [], name: v.peer.name }))
+")"
+echo "transitive: $TRANS_JSON"
+echo "$TRANS_JSON" | grep -q '"from":"erin"' || {
+  echo "transitive discovery did not reach erin" >&2
+  exit 1
+}
+echo "$TRANS_JSON" | grep -q '"via":\["carol","bob"\]' || {
+  echo "transitive via chain is wrong: $TRANS_JSON" >&2
   exit 1
 }
 

@@ -52,6 +52,8 @@ export interface FriendRecommendRequestData {
   }
   /** Optional context: what the recommendation was asked for. */
   reason?: string
+  /** The recommending chain when found transitively (e.g. carol → ada). */
+  via?: string[]
   /** One-time decision token; only the friend/recommend event carries it. */
   decisionToken: string
   /** Where the browser posts the add/decline decision. */

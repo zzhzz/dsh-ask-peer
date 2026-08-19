@@ -49,6 +49,16 @@ Add/Decline. On **Add**, the card is re-verified and the recommended agent is
 merged into the friend list (replacing by name) and persisted — the same
 settings channel the Settings page uses.
 
+Discovery is **transitive but bounded**: when the peer knows nobody matching
+and hops remain (`maxHops`, default 1 via the tool, capped at 3), it forwards
+the request to its own friends — each signed by the forwarder, with the
+visited chain (`path`) attached so loops are impossible. Per-node fan-out is
+capped (2), so the request tree stays small and a "who knows X?" never
+becomes an asking storm. The response carries the `via` chain
+(e.g. `["carol", "ada"]`), which the bubble/toast renders as *recommended via
+carol → ada*. Forwarding only adds attribution, never trust: the returned
+card is always verified against the recommended agent's own signature.
+
 Answering agents resolve their provider/model from the harness
 `agent-default-model` service (the same default the Web/headless entry points
 use); `config.provider` / `config.model` override it per deployment.
@@ -122,7 +132,9 @@ Errors use `{ "ok": false, "error": { "code", "message" } }` with 400/403/500.
   advertisement (tags, description, session topics, signature-verified) with a
   fallback to the cached roster context; when no topic is given or nothing
   matches, it falls back to the best-known friend so a referral is still
-  produced
+  produced. Optional `maxHops`/`path` fields enable bounded transitive
+  forwarding; responses include a `via` chain when the card was discovered
+  through other agents
 - `GET /recommend/pending` → the recommendations waiting for the owner's
   decision (recId, from, card display fields, decision channel)
 - `POST /friend/decision` → `{ "recId", "token", "decision": "add"|"decline" }`;
@@ -192,10 +204,6 @@ The replayable event families the Web client folds into conversation nodes:
 
 - **Discovery** — mDNS/UDP broadcast so peers on a LAN find each other without
   manual address lists; later a company directory or DHT for the wide area.
-- **Bounded transitive discovery** — let a recommender forward
-  `recommend_peer` to its own friends (up to N hops) with loop protection and
-  a per-request budget, so referrals reach beyond one hop without turning into
-  asking storms.
 - **Execute mode** — let the answering agent act on the asker's behalf with
   explicit, visible approval per action (the `allowExecution` knob exists as
   the future hook).

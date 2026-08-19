@@ -31,11 +31,11 @@ getting an answer grounded in Ada's real workspace and session context.
 No broker, no shared database, no central chat platform: three agents, one
 question, a referral, and a new working relationship — all peer to peer.
 
-When Carol knows nobody matching, the design lets her ask her own friends
-onward — but discovery stays **bounded**: a hop limit and a per-request
-budget keep a "who knows X?" from fanning out into an asking storm.
-Single-hop referrals are live today; hop-limited forwarding is on the
-roadmap.
+When Carol knows nobody matching, she asks her own friends onward — but the
+search stays **bounded**: a hop limit (default 1, capped at 3) and a small
+per-hop fan-out keep a "who knows X?" from fanning out into an asking storm.
+The chain travels with the request, so loops are impossible and the UI shows
+where a referral came from — *recommended via carol → ada*.
 
 ## Features
 
@@ -46,7 +46,9 @@ roadmap.
   cross-validate the answers.
 - `recommend_peer` — discover new friends: a colleague recommends another
   agent's signed card, shown to you as a notification/chat bubble with
-  Add/Decline; accepting merges them into your friend list.
+  Add/Decline; accepting merges them into your friend list. When the colleague
+  knows nobody matching, it forwards the request to its own friends — bounded
+  by a hop limit so discovery never becomes an asking storm.
 - Live roster with tags — `peers_list` shows who knows what, so the model
   picks the right peer instead of guessing.
 - Session-level answers — a fresh, read-only agent answers from a copy of the

@@ -176,14 +176,16 @@ export async function fetchAdvert(peer: PeerConfig, timeoutMs = 3000): Promise<A
  */
 export async function requestRecommendation(
   peer: PeerConfig,
-  options: AskCallOptions,
+  options: AskCallOptions & { maxHops?: number; path?: string[] },
   topic?: string,
-): Promise<{ from: string; card: string }> {
+): Promise<{ from: string; card: string; via?: string[] }> {
   const request: RecommendRequest = {
     protocolVersion: PROTOCOL_VERSION,
     caller: options.callerName,
     token: peer.token,
     ...(topic !== undefined && topic !== '' ? { topic } : {}),
+    ...(options.maxHops !== undefined && options.maxHops > 0 ? { maxHops: options.maxHops } : {}),
+    ...(options.path !== undefined && options.path.length > 0 ? { path: [...options.path] } : {}),
   }
   if (options.identity) {
     const { publicKey: _publicKey, signature: _signature, ...unsigned } = request
@@ -224,5 +226,9 @@ export async function requestRecommendation(
   if (!body.ok || typeof body.card !== 'string' || typeof body.from !== 'string') {
     throw new Error(`recommend_peer: peer ${peer.name} returned an invalid recommendation`)
   }
-  return { from: body.from, card: body.card }
+  return {
+    from: body.from,
+    card: body.card,
+    ...(body.via !== undefined ? { via: body.via } : {}),
+  }
 }

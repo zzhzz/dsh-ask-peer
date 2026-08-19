@@ -42,6 +42,7 @@ export interface FriendRecommendChatData {
     readonly tags?: string[]
   }
   readonly reason?: string
+  readonly via?: string[]
   readonly decisionUrl?: string
   readonly decisionToken?: string
 }
@@ -126,6 +127,7 @@ const friendRecommendDefinition: ConversationNodeDefinition<FriendRecommendChatD
       from: match.event.data.from,
       peer: match.event.data.peer,
       reason: match.event.data.reason,
+      via: match.event.data.via,
       decisionUrl: match.event.data.decisionUrl,
       decisionToken: match.event.data.decisionToken,
     }

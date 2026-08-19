@@ -7,6 +7,7 @@ import type { Config, PeerConfig } from './config.ts'
 import type { AskDecisionData, AskRequestData, AskResultData } from './events.ts'
 import { canonicalJson, shortSign, signPayload, verifyPayload, type Identity } from './identity.ts'
 import { buildFriendCard, verifyFriendCard } from './card.ts'
+import { requestRecommendation } from './peer-client.ts'
 import {
   emitRecommendationDecision,
   listPendingRecommendations,
@@ -44,6 +45,10 @@ import { localFromConfig, type AskPeerSettings, type LocalSettings } from './set
 
 const MAX_BODY_BYTES = 1024 * 1024
 const ASK_RESULT_TTL_MS = 10 * 60 * 1000
+/** Transitive recommendation bounds: hop cap, per-node fan-out, forward timeout. */
+const MAX_RECOMMEND_HOPS = 3
+const MAX_RECOMMEND_FORWARD = 2
+const FORWARD_TIMEOUT_MS = 4000
 
 /** Live state of one async ask. */
 interface AskResultEntry {
@@ -224,7 +229,7 @@ async function handleRequest(
   }
 
   if (req.method === 'POST' && url.pathname === RECOMMEND_PATH) {
-    await handleRecommend(req, res, config, hooks)
+    await handleRecommend(req, res, config, hooks, identity)
     return
   }
 
@@ -658,6 +663,7 @@ async function handleRecommend(
   res: ServerResponse,
   config: Config,
   hooks: AskServerHooks,
+  identity: Identity,
 ): Promise<void> {
   let request: RecommendRequest
   try {
@@ -681,7 +687,18 @@ async function handleRecommend(
   }
 
   const topic = typeof request.topic === 'string' ? request.topic.trim() : ''
-  const candidates = hooks.getPeers().filter((item) => item.name !== request.caller)
+  const rawHops = typeof request.maxHops === 'number' ? request.maxHops : 0
+  const maxHops = Math.min(Math.max(Math.floor(rawHops), 0), MAX_RECOMMEND_HOPS)
+  const path = Array.isArray(request.path)
+    ? request.path.filter((item): item is string => typeof item === 'string')
+    : []
+  const excluded = new Set([request.caller, ...path])
+  const candidates = hooks.getPeers().filter((item) => !excluded.has(item.name))
+
+  if (candidates.length === 0) {
+    sendJson(res, 404, errorResponse('no_recommendation', 'you have no friends to recommend'))
+    return
+  }
 
   // Score against each candidate's LIVE advertisement (fresh tags/description/
   // session topics, signature-verified), falling back to the cached roster
@@ -708,17 +725,64 @@ async function handleRecommend(
       ? scored.filter((entry) => entry.score > 0)
       : scored
 
-  if (ordered.length === 0) {
-    sendJson(res, 404, errorResponse('no_recommendation', 'you have no friends to recommend'))
+  // Topic-driven discovery forwards BEFORE settling for a non-matching
+  // friend: if nobody here matches and hops remain, ask our own friends.
+  const preferForward = topic !== '' && maxHops > 0 && !scored.some((entry) => entry.score > 0)
+
+  // 1. Direct matches: fetch the matching candidates' cards ourselves.
+  if (!preferForward) {
+    for (const { peer } of ordered.slice(0, 3)) {
+      const card = await fetchFriendCard(peer)
+      if (card === undefined) continue
+      // When this request arrived via a forward, this node is the terminal
+      // recommender and must mark itself in the via chain.
+      const via = path.length > 0 ? [config.callerName] : undefined
+      sendJson(
+        res,
+        200,
+        { ok: true, from: peer.name, card, ...(via !== undefined ? { via } : {}) } satisfies RecommendSuccess,
+      )
+      return
+    }
+  }
+
+  // 2. Transitive: forward to the best candidates. The hop cap + small
+  //    per-node fan-out bound the request tree, so a "who knows X?" never
+  //    becomes an asking storm; the path list prevents loops back into the
+  //    chain. Only topic-driven requests forward (a topic-less "recommend
+  //    someone" is answered from this peer's own friends directly).
+  if (maxHops > 0 && topic !== '') {
+    for (const { peer } of ordered.slice(0, MAX_RECOMMEND_FORWARD)) {
+      const forwarded = await forwardRecommendation(peer, config, identity, {
+        topic,
+        maxHops: maxHops - 1,
+        path: [...new Set([...path, request.caller, config.callerName])],
+      })
+      if (forwarded === undefined) continue
+      if (!verifyFriendCard(forwarded.card).ok) continue
+      sendJson(res, 200, {
+        ok: true,
+        from: forwarded.from,
+        card: forwarded.card,
+        via: [config.callerName, ...(forwarded.via ?? [])],
+      } satisfies RecommendSuccess)
+      return
+    }
+  }
+
+  // 3. Last resort: fall back to the best-known friend's card directly.
+  for (const { peer } of scored.slice(0, 3)) {
+    const card = await fetchFriendCard(peer)
+    if (card === undefined) continue
+    const via = path.length > 0 ? [config.callerName] : undefined
+    sendJson(
+      res,
+      200,
+      { ok: true, from: peer.name, card, ...(via !== undefined ? { via } : {}) } satisfies RecommendSuccess,
+    )
     return
   }
 
-  for (const { peer } of ordered.slice(0, 3)) {
-    const card = await fetchFriendCard(peer)
-    if (card === undefined) continue
-    sendJson(res, 200, { ok: true, from: peer.name, card } satisfies RecommendSuccess)
-    return
-  }
   sendJson(
     res,
     404,
@@ -727,6 +791,38 @@ async function handleRecommend(
       'no reachable friend to recommend (candidate friends are offline or have no card)',
     ),
   )
+}
+
+/**
+ * Forward a recommendation request to one friend, signed by this side. The
+ * returned card is still verified against the recommended agent's own
+ * signature — forwarding only adds attribution, never trust.
+ */
+async function forwardRecommendation(
+  peer: PeerConfig,
+  config: Config,
+  identity: Identity,
+  forward: { topic: string; maxHops: number; path: string[] },
+): Promise<{ from: string; card: string; via?: string[] } | undefined> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FORWARD_TIMEOUT_MS)
+  try {
+    return await requestRecommendation(
+      peer,
+      {
+        callerName: config.callerName,
+        identity,
+        maxHops: forward.maxHops,
+        path: forward.path,
+        signal: controller.signal,
+      },
+      forward.topic,
+    )
+  } catch {
+    return undefined
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /**

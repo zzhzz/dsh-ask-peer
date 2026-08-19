@@ -127,8 +127,8 @@ export function apply(ctx: Context, config: AskPeerConfig): void {
   }
   applySettings(stored.settings)
 
-  registerAskTools(ctx, registry, runtime, identity, (from, card, reason) => {
-    const result = registerRecommendation(ctx, runtime, from, card, reason)
+  registerAskTools(ctx, registry, runtime, identity, (from, card, reason, via) => {
+    const result = registerRecommendation(ctx, runtime, from, card, reason, via)
     if ('error' in result) ctx.logger.warn(`[ask-peer] recommendation rejected: ${result.error}`)
   })
   startRosterRefresh(ctx, registry, runtime)

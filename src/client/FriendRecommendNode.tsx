@@ -70,7 +70,9 @@ export function FriendRecommendNodeView({ node, t: _t }: ChatNodeViewProps<'frie
   return (
     <div style={styles.card} data-friend-status={data.status}>
       <div style={styles.header}>
-        {data.from} recommends {peer.name}
+        {data.via !== undefined && data.via.length > 0
+          ? `${peer.name} recommended via ${data.via.join(' → ')}`
+          : `${data.from} recommends ${peer.name}`}
       </div>
       {data.reason !== undefined ? <div style={styles.reason}>Asked about: {data.reason}</div> : null}
       <div style={styles.detail}>

@@ -111,6 +111,14 @@ export interface RecommendRequest {
   signature?: string
   /** Optional topic the recommendation should match. */
   topic?: string
+  /**
+   * How many ADDITIONAL hops the request may travel beyond this peer (0 =
+   * answer from this peer's own friends only). Bounded server-side to keep
+   * transitive discovery from fanning out into an asking storm.
+   */
+  maxHops?: number
+  /** The chain of agents already asked, for loop prevention. */
+  path?: string[]
 }
 
 export interface RecommendSuccess {
@@ -119,6 +127,12 @@ export interface RecommendSuccess {
   from: string
   /** The recommended agent's signed friend card (`dsh-ask-peer-card:...`). */
   card: string
+  /**
+   * The recommending chain when the card was found transitively, e.g.
+   * `["carol", "ada"]` means carol asked ada, who produced the card. Omitted
+   * when the peer answered directly from its own friends.
+   */
+  via?: string[]
 }
 
 /** A recommendation waiting for the owner's Add/Decline decision (web view). */
@@ -137,6 +151,8 @@ export interface PendingRecommendView {
   }
   /** Optional context: what the recommendation was asked for. */
   reason?: string
+  /** The recommending chain when found transitively (e.g. carol → ada). */
+  via?: string[]
   /** Where the browser posts the add/decline decision. */
   decisionUrl: string
   /** One-time decision token; only the pending view carries it. */

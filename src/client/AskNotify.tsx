@@ -125,7 +125,9 @@ export function AskNotify() {
       {friends.map((rec) => (
         <div key={rec.recId} style={styles.card}>
           <div style={styles.header}>
-            {rec.from} recommends {rec.peer.name}
+            {rec.via !== undefined && rec.via.length > 0
+              ? `${rec.peer.name} recommended via ${rec.via.join(' → ')}`
+              : `${rec.from} recommends ${rec.peer.name}`}
           </div>
           {rec.reason !== undefined ? (
             <div style={styles.question}>Asked about: {rec.reason}</div>

@@ -12,7 +12,7 @@ export function registerAskTools(
   registry: PeerRegistry,
   config: Config,
   identity: Identity,
-  onRecommend?: (from: string, card: string, reason?: string) => void,
+  onRecommend?: (from: string, card: string, reason?: string, via?: string[]) => void,
 ): void {
   registerAskPeer(ctx, registry, config, identity)
   registerPeersList(ctx, registry)
@@ -105,7 +105,7 @@ function registerRecommendPeer(
   registry: PeerRegistry,
   config: Config,
   identity: Identity,
-  onRecommend?: (from: string, card: string, reason?: string) => void,
+  onRecommend?: (from: string, card: string, reason?: string, via?: string[]) => void,
 ): void {
   ctx.tools.register(
     defineTool({
@@ -127,6 +127,13 @@ function registerRecommendPeer(
           description:
             'Optional topic the recommended agent should know about (their tags/description are matched)',
         },
+        maxHops: {
+          type: 'number',
+          description:
+            'How many additional hops the request may travel beyond the peer you ask ' +
+            '(default 1). When the peer knows nobody matching, it asks its own friends, ' +
+            'bounded by this limit; keep it small (0-2) so discovery never turns into an asking storm.',
+        },
       },
       output: {
         schema: {
@@ -136,6 +143,7 @@ function registerRecommendPeer(
             peer: { type: 'string', required: true },
             from: { type: 'string', required: true },
             recommended: { type: 'string', required: true },
+            via: { type: 'array', items: { type: 'string' }, required: true },
             status: { type: 'string', required: true },
           },
         },
@@ -143,7 +151,9 @@ function registerRecommendPeer(
           {
             type: 'text',
             text:
-              `${value.from} recommended ${value.recommended}. ` +
+              (value.via.length > 0
+                ? `${value.recommended} recommended via ${value.via.join(' → ')}. `
+                : `${value.from} recommended ${value.recommended}. `) +
               `The recommendation is waiting for the user's approval; it will be added to friends only if the user accepts.`,
           },
         ],
@@ -156,18 +166,24 @@ function registerRecommendPeer(
             `recommend_peer: unknown peer "${args.peer}" — call peers_list to see available peers. Known: ${known || 'none'}`,
           )
         }
-        const { card } = await requestRecommendation(
+        const { card, via } = await requestRecommendation(
           peer,
-          { callerName: config.callerName, identity, signal: exec.signal },
+          {
+            callerName: config.callerName,
+            identity,
+            maxHops: args.maxHops ?? 1,
+            signal: exec.signal,
+          },
           args.topic,
         )
         const verified = verifyFriendCard(card)
         if (!verified.ok) throw new Error(`recommend_peer: recommended card is invalid: ${verified.reason}`)
-        onRecommend?.(args.peer, card, args.topic)
+        onRecommend?.(args.peer, card, args.topic, via)
         return {
           peer: args.peer,
           from: args.peer,
           recommended: verified.peer.name,
+          via: via ?? [],
           status: 'awaiting_user_approval',
         }
       },

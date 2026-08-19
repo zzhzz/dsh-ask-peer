@@ -21,6 +21,7 @@ interface PendingRecommendation {
   card: string
   peer: PendingRecommendView['peer']
   reason?: string
+  via?: string[]
   /** The session the request event was appended to, for the decision event. */
   session?: { append: (type: string, data: unknown) => void }
   createdAt: number
@@ -44,6 +45,7 @@ export function registerRecommendation(
   from: string,
   card: string,
   reason?: string,
+  via?: string[],
 ): { recId: string; peer: PendingRecommendView['peer'] } | { error: string } {
   const verified = verifyFriendCard(card)
   if (!verified.ok) return { error: `recommended card is invalid: ${verified.reason}` }
@@ -66,6 +68,7 @@ export function registerRecommendation(
     card,
     peer,
     ...(reason !== undefined && reason !== '' ? { reason } : {}),
+    ...(via !== undefined && via.length > 0 ? { via: [...via] } : {}),
     ...(session !== undefined
       ? {
           session: {
@@ -88,6 +91,7 @@ export function registerRecommendation(
       from,
       peer,
       ...(reason !== undefined && reason !== '' ? { reason } : {}),
+      ...(via !== undefined && via.length > 0 ? { via: [...via] } : {}),
       decisionToken: pending.token,
       decisionUrl: decisionUrl(config),
     }
@@ -109,6 +113,7 @@ export function listPendingRecommendations(config: Config): PendingRecommendView
     from: pending.from,
     peer: pending.peer,
     ...(pending.reason !== undefined ? { reason: pending.reason } : {}),
+    ...(pending.via !== undefined && pending.via.length > 0 ? { via: [...pending.via] } : {}),
     decisionUrl: base,
     decisionToken: pending.token,
   }))
