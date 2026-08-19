@@ -88,12 +88,23 @@ CAROL_PUB="$(gen_identity carol)"
 # values every run (keys are kept).
 rm -f "$SMOKE_DIR/keys/settings-ada.json" "$SMOKE_DIR/keys/settings-bob.json" "$SMOKE_DIR/keys/settings-carol.json"
 
-# 1. Create the profiles (base bundle + this plugin).
-for side in ada bob carol; do
-  if [ ! -d "$DSH_HOME/profiles/$side" ]; then
-    log "creating profile $side"
-    (cd "$ROOT" && DSH_HOME="$DSH_HOME" pnpm exec dsh plugin --profile "$side" add .)
+# 1. Create (or repair) the profiles: the bundle must be listed in the
+#    profile manifest, or the ask-peer row has no plugin to resolve.
+ensure_profile() {
+  local side="$1"
+  if [ -f "$DSH_HOME/profiles/$side/package.json" ] &&
+    node -e "
+      const p = require(process.argv[1])
+      process.exit(p.dsh?.profile?.bundles?.includes('dsh-ask-peer') ? 0 : 1)
+    " "$DSH_HOME/profiles/$side/package.json" 2>/dev/null; then
+    return
   fi
+  log "creating profile $side"
+  rm -rf "$DSH_HOME/profiles/$side"
+  (cd "$ROOT" && DSH_HOME="$DSH_HOME" pnpm exec dsh plugin --profile "$side" add .)
+}
+for side in ada bob carol; do
+  ensure_profile "$side"
 done
 
 # 2. Configure each side. Ada additionally gets the headless bundle so the
@@ -417,7 +428,9 @@ RECOMMEND_JSON="$(node --input-type=module -e "
   let result
   for (let i = 0; i < 20; i++) {
     try {
-      result = await requestRecommendation(peer, { callerName: 'ada', identity }, 'env-setup')
+      // The exact topic Bob used in the real test that 404'd; locks the
+      // live-advertisement matching regression.
+      result = await requestRecommendation(peer, { callerName: 'ada', identity }, 'docker-compose dev environment')
       break
     } catch (error) {
       if (i === 19) throw error

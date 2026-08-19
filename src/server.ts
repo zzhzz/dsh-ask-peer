@@ -681,30 +681,45 @@ async function handleRecommend(
   }
 
   const topic = typeof request.topic === 'string' ? request.topic.trim() : ''
-  const candidates = hooks
-    .getPeers()
-    .filter((item) => item.name !== request.caller)
-    .sort(
-      (a, b) =>
-        scoreFriend(b, topic, hooks.getPeerContext(b.name)) -
-        scoreFriend(a, topic, hooks.getPeerContext(a.name)),
-    )
+  const candidates = hooks.getPeers().filter((item) => item.name !== request.caller)
+
+  // Score against each candidate's LIVE advertisement (fresh tags/description/
+  // session topics, signature-verified), falling back to the cached roster
+  // context when a fetch fails. This must not depend on the periodic roster
+  // refresh having succeeded.
+  const scored = await Promise.all(
+    candidates.map(async (peer) => {
+      const advert = await fetchAdvertSafely(peer)
+      const context =
+        advertContext(peer, advert) ??
+        hooks.getPeerContext(peer.name) ?? {
+          description: peer.description,
+        }
+      return { peer, score: scoreFriend(peer, topic, context) }
+    }),
+  )
+  scored.sort((a, b) => b.score - a.score)
+
   if (topic !== '') {
-    const matching = candidates.filter((item) => scoreFriend(item, topic, hooks.getPeerContext(item.name)) > 0)
+    const matching = scored.filter((entry) => entry.score > 0)
     if (matching.length === 0) {
+      const known = candidates.map((item) => item.name).join(', ') || 'none'
       sendJson(
         res,
         404,
-        errorResponse('no_recommendation', `no friend matches the topic "${topic}"`),
+        errorResponse(
+          'no_recommendation',
+          `no friend matches the topic "${topic}" (known friends: ${known})`,
+        ),
       )
       return
     }
   }
 
-  for (const candidate of candidates.slice(0, 3)) {
-    const card = await fetchFriendCard(candidate)
+  for (const { peer } of scored.slice(0, 3)) {
+    const card = await fetchFriendCard(peer)
     if (card === undefined) continue
-    sendJson(res, 200, { ok: true, from: candidate.name, card } satisfies RecommendSuccess)
+    sendJson(res, 200, { ok: true, from: peer.name, card } satisfies RecommendSuccess)
     return
   }
   sendJson(
@@ -799,6 +814,52 @@ function scoreFriend(
     if (text.includes(word)) score += 1
   }
   return score
+}
+
+/** Fetch a friend's live advertisement; undefined when unreachable/invalid. */
+async function fetchAdvertSafely(peer: PeerConfig, timeoutMs = 2500): Promise<Advert | undefined> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(`http://${peer.host}:${peer.port}${ADVERTISE_PATH}`, {
+      signal: controller.signal,
+    })
+    if (!response.ok) return undefined
+    const advert = (await response.json()) as Advert
+    if (advert.protocolVersion !== PROTOCOL_VERSION || typeof advert.name !== 'string') return undefined
+    return advert
+  } catch {
+    return undefined
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * The scoreable context of a friend advertisement, verified against the
+ * friend's stored public sign when one is configured. Undefined when the
+ * advert is missing or its signature does not match.
+ */
+function advertContext(
+  peer: PeerConfig,
+  advert: Advert | undefined,
+): { description?: string; tags?: string[]; topics?: string[] } | undefined {
+  if (advert === undefined) return undefined
+  if (peer.publicKey !== undefined) {
+    const { publicKey, signature, ...unsigned } = advert
+    if (publicKey !== peer.publicKey) return undefined
+    if (signature === undefined || !verifyPayload(peer.publicKey, canonicalJson(unsigned), signature)) {
+      return undefined
+    }
+  }
+  return {
+    description: advert.description,
+    tags: advert.tags,
+    topics: advert.sessions.flatMap((session) => [
+      ...(session.topics ?? []),
+      ...(session.topic !== undefined && session.topic !== '' ? [session.topic] : []),
+    ]),
+  }
 }
 
 /** Fetch a friend's current signed card; undefined when unreachable/invalid. */

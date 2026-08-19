@@ -216,7 +216,7 @@ for _ in $(seq 1 40); do
     const { from, card } = await requestRecommendation(
       peer,
       { callerName: 'bob', identity },
-      'docker environment setup',
+      'docker-compose dev environment',
     )
     const v = verifyFriendCard(card)
     if (!v.ok) throw new Error('card invalid: ' + v.reason)

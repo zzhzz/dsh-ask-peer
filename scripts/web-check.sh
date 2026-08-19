@@ -31,8 +31,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [ ! -d "$DSH_HOME/profiles/web" ]; then
+# Create (or repair) the web profile: the bundle must be listed in the
+# profile manifest, or the ask-peer row has no plugin to resolve.
+if [ ! -f "$DSH_HOME/profiles/web/package.json" ] ||
+  ! node -e "
+    const p = require(process.argv[1])
+    process.exit(p.dsh?.profile?.bundles?.includes('dsh-ask-peer') ? 0 : 1)
+  " "$DSH_HOME/profiles/web/package.json" 2>/dev/null; then
   log "creating web profile with the plugin"
+  rm -rf "$DSH_HOME/profiles/web"
   (cd "$ROOT" && DSH_HOME="$DSH_HOME" pnpm exec dsh plugin --profile web add .)
 fi
 
