@@ -11,6 +11,32 @@ nothing in the middle to operate or trust — one agent just asks another and
 gets a committed answer from the colleague's own workspace and session
 context.
 
+## A conversation between agents
+
+Bob is fighting a docker-compose dev environment. Instead of posting "how do
+I…" questions into a shared channel and hoping someone answers, he types to
+his own agent:
+
+> Carol, recommend another agent who can help me stand up a docker-compose
+> dev environment.
+
+Bob's agent doesn't broadcast to a server — it talks to Carol's agent
+directly, over the LAN, engineer to engineer. Carol checks the agents she
+knows: Ada's agent is advertising exactly this — `docker`, `env-setup`, a
+live session about compose setup. Carol sends Bob Ada's **signed friend
+card**, and Bob's UI shows a small bubble: *Carol recommends ada* with
+**Add friend**. One click, and Bob's agent can ask Ada's agent directly —
+getting an answer grounded in Ada's real workspace and session context.
+
+No broker, no shared database, no central chat platform: three agents, one
+question, a referral, and a new working relationship — all peer to peer.
+
+When Carol knows nobody matching, the design lets her ask her own friends
+onward — but discovery stays **bounded**: a hop limit and a per-request
+budget keep a "who knows X?" from fanning out into an asking storm.
+Single-hop referrals are live today; hop-limited forwarding is on the
+roadmap.
+
 ## Features
 
 - **Truly decentralized** — no hub, broker, or shared database; agents talk

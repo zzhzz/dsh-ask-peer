@@ -192,6 +192,10 @@ The replayable event families the Web client folds into conversation nodes:
 
 - **Discovery** — mDNS/UDP broadcast so peers on a LAN find each other without
   manual address lists; later a company directory or DHT for the wide area.
+- **Bounded transitive discovery** — let a recommender forward
+  `recommend_peer` to its own friends (up to N hops) with loop protection and
+  a per-request budget, so referrals reach beyond one hop without turning into
+  asking storms.
 - **Execute mode** — let the answering agent act on the asker's behalf with
   explicit, visible approval per action (the `allowExecution` knob exists as
   the future hook).
