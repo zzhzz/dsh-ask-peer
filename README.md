@@ -94,3 +94,8 @@ new friends on its own:
 Model tools: `ask_peer`, `ask_peers`, `peers_list`, `recommend_peer`,
 `ask_peer_async` / `ask_result`. The full configuration reference and
 protocol live in `src/config.ts` and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development setup, validation commands, and pull request guidelines.
