@@ -66,7 +66,7 @@ if [ "$ok" != true ]; then
 fi
 
 log "boot manifest includes the ask-peer plugin row"
-curl -s http://127.0.0.1:3080/ | grep -q 'dsh-ask-peer' || {
+curl -s http://127.0.0.1:3080/ | grep 'dsh-ask-peer' >/dev/null || {
   echo "boot manifest missing dsh-ask-peer" >&2
   exit 1
 }
@@ -74,7 +74,7 @@ curl -s http://127.0.0.1:3080/ | grep -q 'dsh-ask-peer' || {
 log "client bundle is served"
 ok=false
 for _ in $(seq 1 60); do
-  if curl -sf http://127.0.0.1:3080/plugins/dsh-ask-peer/client.js 2>/dev/null | grep -q '__ModuleLoader__.load'; then
+  if curl -sf http://127.0.0.1:3080/plugins/dsh-ask-peer/client.js 2>/dev/null | grep '__ModuleLoader__.load' >/dev/null; then
     ok=true
     break
   fi
@@ -87,13 +87,13 @@ if [ "$ok" != true ]; then
 fi
 
 log "same-origin config route is served"
-curl -sf http://127.0.0.1:3080/ask-peer/config | grep -q 'serverUrl' || {
+curl -sf http://127.0.0.1:3080/ask-peer/config | grep 'serverUrl' >/dev/null || {
   echo "config route missing serverUrl" >&2
   exit 1
 }
 
 log "pending-friends route is served"
-curl -sf http://127.0.0.1:3080/ask-peer/pending-friends | grep -q '\[\]' || {
+curl -sf http://127.0.0.1:3080/ask-peer/pending-friends | grep '\[\]' >/dev/null || {
   echo "pending-friends route did not return an empty list" >&2
   exit 1
 }
