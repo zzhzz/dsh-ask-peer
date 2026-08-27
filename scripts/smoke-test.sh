@@ -32,17 +32,13 @@ PIDS=()
 
 log() { printf '\n== %s ==\n' "$*"; }
 
+source "$ROOT/scripts/test-port-preflight.sh"
+
 # Preflight: every port the smoke test uses must be free, or a leftover dsh
 # instance (e.g. a real browser test you forgot to stop) will make the run
-# fail in confusing ways.
+# fail in confusing ways. Interactive runs may stop it with confirmation.
 log "preflight: test ports must be free"
-for port in 3080 3877 3878 3879 3890 9001 9002 9003 9004; do
-  if lsof -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
-    echo "port $port is already in use — stop the other dsh instance first" >&2
-    echo "  kill \$(lsof -tiTCP:$port -sTCP:LISTEN)" >&2
-    exit 1
-  fi
-done
+ensure_test_ports_free 3080 3877 3878 3879 3890 9001 9002 9003 9004
 
 cleanup() {
   printf '%s\n' "${PIDS[@]:-}" > "$SMOKE_DIR/live.pids"

@@ -143,8 +143,10 @@ The expected flow uses `peers_list`, `recommend_peer`, and `ask_peers`, then
 returns a comparison of the mock colleagues' answers. The left sidebar lists
 session workspaces, not peer identities, so seeing Bob or Carol there is only
 shared test-session history. Press `Ctrl+C` in the terminal to stop the test
-environment. If startup reports an occupied port, stop the previous test
-instance and run the command again.
+environment. If a required port is occupied in an interactive run, the test
+shows the listening process and asks whether to stop it; answer `y` to
+continue or anything else to exit. Non-interactive runs exit without stopping
+any process, as do CI runs.
 
 ## Contributing
 
