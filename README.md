@@ -95,6 +95,57 @@ Model tools: `ask_peer`, `ask_peers`, `peers_list`, `recommend_peer`,
 `ask_peer_async` / `ask_result`. The full configuration reference and
 protocol live in `src/config.ts` and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Testing
+
+The standard test path is fully local: it uses temporary dsh profiles and
+mock model endpoints, so no `DEEPSEEK_API_KEY` is required. From a fresh
+checkout with Node.js `^22.19.0 || >=24.0.0` and pnpm 10 or newer:
+
+```sh
+pnpm install
+pnpm run typecheck
+pnpm run build
+pnpm smoke
+pnpm web-check
+```
+
+The checks are successful when every command exits with status 0. In
+particular, the two end-to-end checks finish with:
+
+```text
+== smoke test passed ==
+== web check passed: browser half discovered and served ==
+```
+
+`pnpm smoke` exercises real local dsh profiles for Ada, Bob, Carol, and Erin,
+including authenticated peer requests, recommendations, bounded transitive
+discovery, parallel answers, and the read-only answer sandbox. `pnpm
+web-check` verifies that the Web profile discovers the plugin and serves its
+browser bundle and same-origin routes.
+
+To keep the tested topology running for manual browser testing, use:
+
+```sh
+KEEP_RUNNING=1 pnpm smoke
+```
+
+Wait for the following line, then open <http://127.0.0.1:3080>, create a new
+session in the `dsh-ask-peer` workspace, and submit a request such as:
+
+```text
+== interactive environment ready: ada=http://127.0.0.1:3080 peers=3878,3879,3890 mocks=9001-9004 (Ctrl-C stops everything) ==
+```
+
+> Find colleagues who can help with this environment, ask them how to start
+> it, and compare their answers.
+
+The expected flow uses `peers_list`, `recommend_peer`, and `ask_peers`, then
+returns a comparison of the mock colleagues' answers. The left sidebar lists
+session workspaces, not peer identities, so seeing Bob or Carol there is only
+shared test-session history. Press `Ctrl+C` in the terminal to stop the test
+environment. If startup reports an occupied port, stop the previous test
+instance and run the command again.
+
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
