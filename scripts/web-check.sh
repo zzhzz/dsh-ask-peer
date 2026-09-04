@@ -15,14 +15,13 @@ PIDS=()
 
 log() { printf '\n== %s ==\n' "$*"; }
 
+source "$ROOT/scripts/test-port-preflight.sh"
+
 # Preflight: the web UI port must be free (a running dsh instance would
-# collide and make the check fail confusingly).
+# collide and make the check fail confusingly). Interactive runs may stop it
+# with confirmation.
 log "preflight: port 3080 must be free"
-if lsof -iTCP:3080 -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
-  echo "port 3080 is already in use — stop the other dsh instance first" >&2
-  echo "  kill \$(lsof -tiTCP:3080 -sTCP:LISTEN)" >&2
-  exit 1
-fi
+ensure_test_ports_free 3080
 
 cleanup() {
   for pid in "${PIDS[@]:-}"; do
@@ -66,7 +65,7 @@ if [ "$ok" != true ]; then
 fi
 
 log "boot manifest includes the ask-peer plugin row"
-curl -s http://127.0.0.1:3080/ | grep -q 'dsh-ask-peer' || {
+curl -s http://127.0.0.1:3080/ | grep 'dsh-ask-peer' >/dev/null || {
   echo "boot manifest missing dsh-ask-peer" >&2
   exit 1
 }
@@ -74,7 +73,7 @@ curl -s http://127.0.0.1:3080/ | grep -q 'dsh-ask-peer' || {
 log "client bundle is served"
 ok=false
 for _ in $(seq 1 60); do
-  if curl -sf http://127.0.0.1:3080/plugins/dsh-ask-peer/client.js 2>/dev/null | grep -q '__ModuleLoader__.load'; then
+  if curl -sf http://127.0.0.1:3080/plugins/dsh-ask-peer/client.js 2>/dev/null | grep '__ModuleLoader__.load' >/dev/null; then
     ok=true
     break
   fi
@@ -87,13 +86,13 @@ if [ "$ok" != true ]; then
 fi
 
 log "same-origin config route is served"
-curl -sf http://127.0.0.1:3080/ask-peer/config | grep -q 'serverUrl' || {
+curl -sf http://127.0.0.1:3080/ask-peer/config | grep 'serverUrl' >/dev/null || {
   echo "config route missing serverUrl" >&2
   exit 1
 }
 
 log "pending-friends route is served"
-curl -sf http://127.0.0.1:3080/ask-peer/pending-friends | grep -q '\[\]' || {
+curl -sf http://127.0.0.1:3080/ask-peer/pending-friends | grep '\[\]' >/dev/null || {
   echo "pending-friends route did not return an empty list" >&2
   exit 1
 }

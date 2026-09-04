@@ -32,17 +32,13 @@ PIDS=()
 
 log() { printf '\n== %s ==\n' "$*"; }
 
+source "$ROOT/scripts/test-port-preflight.sh"
+
 # Preflight: every port the smoke test uses must be free, or a leftover dsh
 # instance (e.g. a real browser test you forgot to stop) will make the run
-# fail in confusing ways.
+# fail in confusing ways. Interactive runs may stop it with confirmation.
 log "preflight: test ports must be free"
-for port in 3080 3877 3878 3879 3890 9001 9002 9003 9004; do
-  if lsof -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
-    echo "port $port is already in use — stop the other dsh instance first" >&2
-    echo "  kill \$(lsof -tiTCP:$port -sTCP:LISTEN)" >&2
-    exit 1
-  fi
-done
+ensure_test_ports_free 3080 3877 3878 3879 3890 9001 9002 9003 9004
 
 cleanup() {
   printf '%s\n' "${PIDS[@]:-}" > "$SMOKE_DIR/live.pids"
@@ -263,7 +259,8 @@ EOF
       const fs = require("node:fs")
       const file = process.argv[1]
       const manifest = JSON.parse(fs.readFileSync(file, "utf8"))
-      const bundles = manifest.dsh?.profile?.bundles ?? []
+      const bundles = (manifest.dsh?.profile?.bundles ?? [])
+        .filter((bundle) => bundle !== "@deepseek-ai/dsh-web-app")
       if (!bundles.includes("@deepseek-ai/dsh-headless")) {
         const base = bundles.indexOf("@deepseek-ai/dsh-base")
         bundles.splice(base + 1, 0, "@deepseek-ai/dsh-headless")
@@ -696,6 +693,41 @@ done
 log "smoke test passed"
 
 if [ "${KEEP_RUNNING:-0}" = "1" ]; then
-  log "keeping processes running: bob=127.0.0.1:3878 carol=127.0.0.1:3879 mocks=9001-9003 (Ctrl-C stops everything)"
+  log "starting ada web UI for interactive testing"
+  node -e '
+    const fs = require("node:fs")
+    const file = process.argv[1]
+    const manifest = JSON.parse(fs.readFileSync(file, "utf8"))
+    const bundles = (manifest.dsh?.profile?.bundles ?? [])
+      .filter((bundle) => bundle !== "@deepseek-ai/dsh-headless")
+    if (!bundles.includes("@deepseek-ai/dsh-web-app")) {
+      const base = bundles.indexOf("@deepseek-ai/dsh-base")
+      bundles.splice(base + 1, 0, "@deepseek-ai/dsh-web-app")
+    }
+    manifest.dsh.profile.bundles = bundles
+    fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`)
+  ' "$DSH_HOME/profiles/ada/package.json"
+
+  DSH_HOME="$DSH_HOME" \
+    DEEPSEEK_API_KEY=mock-key \
+    DEEPSEEK_BASE_URL=http://127.0.0.1:9001/v1 \
+    pnpm exec dsh --profile ada --port 3080 > "$SMOKE_DIR/ada-web.log" 2>&1 &
+  PIDS+=($!)
+
+  ok=false
+  for _ in $(seq 1 120); do
+    if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3080/ 2>/dev/null | grep -q '200'; then
+      ok=true
+      break
+    fi
+    sleep 1
+  done
+  if [ "$ok" != true ]; then
+    echo "ada web UI did not come up; log tail:" >&2
+    tail -n 60 "$SMOKE_DIR/ada-web.log" >&2
+    exit 1
+  fi
+
+  log "interactive environment ready: ada=http://127.0.0.1:3080 peers=3878,3879,3890 mocks=9001-9004 (Ctrl-C stops everything)"
   tail -f /dev/null
 fi
